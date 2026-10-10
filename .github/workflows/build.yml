@@ -117,6 +117,41 @@ jobs:
           RelWithDebInfo/slua-analyze tests/conformance/assert.luau
           RelWithDebInfo/slua-compile tests/conformance/assert.luau
 
+# ServerLua: We don't care about any of these. Sorry.
+
+#  configurations:
+#    strategy:
+#      matrix:
+#        config:
+#          - name: LongJmp
+#            flags: "-DLUA_USE_LONGJMP=1"
+#            codegen: true
+#          - name: Vector4
+#            flags: "-DLUA_VECTOR_SIZE=4"
+#            codegen: false
+#          - name: VectorDouble
+#            flags: "-DLUA_VECTOR_DOUBLE=1"
+#            codegen: false
+#    name: run extra configuration (${{matrix.config.name}})
+#    runs-on: ubuntu-latest
+#    steps:
+#    - uses: actions/checkout@v1
+#    - name: cmake configure
+#      run: cmake . -B build -DCMAKE_BUILD_TYPE=Debug -DLUAU_WERROR=ON -DCMAKE_CXX_FLAGS="${{matrix.config.flags}}" -DCMAKE_C_FLAGS="${{matrix.config.flags}}"
+#    - name: cmake build
+#      run: cmake --build build --target Luau.Conformance --config Debug -j2
+#    - name: run tests
+#      run: |
+#        build/Luau.Conformance
+#        build/Luau.Conformance --fflags=true
+#        build/Luau.Conformance -O2
+#        build/Luau.Conformance -O2 --fflags=true
+#    - name: run codegen tests
+#      if: matrix.config.codegen
+#      run: |
+#        build/Luau.Conformance --codegen --fflags=true
+#        build/Luau.Conformance --codegen -O2 --fflags=true
+
   coverage:
     runs-on: ubuntu-22.04
     steps:
