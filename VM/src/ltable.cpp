@@ -716,7 +716,7 @@ LuaTable* luaH_new(lua_State* L, int narray, int nhash)
 {
     // ServerLua: Keep track of unrooted user allocs if there are multiple in a row
     LUAU_TRACK_UNROOTED_ALLOCS();
-    LuaTable* t = luaM_newgco(L, LuaTable, sizeof(LuaTable), L->activememcat);
+    LuaTable* t = luaM_newgco(L, LuaTable, sizeof(LuaTable), L->activememcat, LUA_TTABLE);
     LUAU_MAYBE_TRACK_UNROOTED(L, sizeof(LuaTable));
     luaC_init(L, t, LUA_TTABLE);
     t->metatable = NULL;
@@ -1069,7 +1069,7 @@ LuaTable* luaH_clone(lua_State* L, LuaTable* tt)
 {
     // ServerLua: keep track of unrooted allocs here since this doesn't use luaH_new() under the hood.
     LUAU_TRACK_UNROOTED_ALLOCS();
-    LuaTable* t = luaM_newgco(L, LuaTable, sizeof(LuaTable), L->activememcat);
+    LuaTable* t = luaM_newgco(L, LuaTable, sizeof(LuaTable), L->activememcat, LUA_TTABLE);
     LUAU_MAYBE_TRACK_UNROOTED(L, sizeof(LuaTable));
     luaC_init(L, t, LUA_TTABLE);
     t->metatable = tt->metatable;

@@ -12,7 +12,7 @@ LUAU_FASTINTVARIABLE(LuauInlineHitsThreshold, 32)
 
 Proto* luaF_newproto(lua_State* L)
 {
-    Proto* f = luaM_newgco(L, Proto, sizeof(Proto), L->activememcat);
+    Proto* f = luaM_newgco(L, Proto, sizeof(Proto), L->activememcat, LUA_TPROTO);
 
     luaC_init(L, f, LUA_TPROTO);
 
@@ -72,7 +72,7 @@ Proto* luaF_newproto(lua_State* L)
 
 Closure* luaF_newLclosure(lua_State* L, int nelems, LuaTable* e, Proto* p)
 {
-    Closure* c = luaM_newgco(L, Closure, sizeLclosure(nelems), L->activememcat);
+    Closure* c = luaM_newgco(L, Closure, sizeLclosure(nelems), L->activememcat, LUA_TFUNCTION);
     luaC_init(L, c, LUA_TFUNCTION);
     c->isC = 0;
     c->env = e;
@@ -87,7 +87,7 @@ Closure* luaF_newLclosure(lua_State* L, int nelems, LuaTable* e, Proto* p)
 
 Closure* luaF_newCclosure(lua_State* L, int nelems, LuaTable* e)
 {
-    Closure* c = luaM_newgco(L, Closure, sizeCclosure(nelems), L->activememcat);
+    Closure* c = luaM_newgco(L, Closure, sizeCclosure(nelems), L->activememcat, LUA_TFUNCTION);
     luaC_init(L, c, LUA_TFUNCTION);
     c->isC = 1;
     c->env = e;
@@ -106,7 +106,7 @@ Closure* luaF_newCclosure(lua_State* L, int nelems, LuaTable* e)
 UpVal* luaF_newupval (lua_State *L)
 {
     // TODO: This is cribbed from Lua 5.1 and may not be correct, verify?
-    UpVal *uv = luaM_newgco(L, UpVal, sizeof(UpVal), L->activememcat);
+    UpVal *uv = luaM_newgco(L, UpVal, sizeof(UpVal), L->activememcat, LUA_TUPVAL);
     luaC_init(L, uv, LUA_TUPVAL);
     uv->markedopen = 0;
     uv->v = &uv->u.value;
@@ -133,7 +133,7 @@ UpVal* luaF_findupval(lua_State* L, StkId level)
     LUAU_ASSERT(L->isactive || L->global->GCthreshold == SIZE_MAX);
     LUAU_ASSERT(!isblack(obj2gco(L))); // we don't use luaC_threadbarrier because active threads never turn black
 
-    UpVal* uv = luaM_newgco(L, UpVal, sizeof(UpVal), L->activememcat); // not found: create a new one
+    UpVal* uv = luaM_newgco(L, UpVal, sizeof(UpVal), L->activememcat, LUA_TUPVAL); // not found: create a new one
     luaC_init(L, uv, LUA_TUPVAL);
     uv->markedopen = 0;
     uv->v = level; // current value lives in the stack

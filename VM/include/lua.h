@@ -155,8 +155,11 @@ enum lua_Type
     LUA_TPROTO,
     LUA_TUPVAL,
 
+    // the count of all Luau types (including those that are never TValue type tags)
+    LUA_T_ALL,
+
     // the count of TValue type tags
-    LUA_T_COUNT = LUA_TDEADKEY
+    LUA_T_COUNT = LUA_TDEADKEY,
 };
 
 // ServerLua: so we can figure out _why_ an interrupt happened to track
@@ -187,7 +190,7 @@ typedef std::unordered_set<const void*> lua_OpaqueGCObjectSet;
 /*
 ** state manipulation
 */
-LUA_API lua_State* lua_newstate(lua_Alloc f, void* ud);
+LUA_API lua_State* lua_newstate(lua_Alloc allocator, void* ud);
 LUA_API void lua_close(lua_State* L);
 LUA_API lua_State* lua_newthread(lua_State* L);
 LUA_API lua_State* lua_mainthread(lua_State* L);
@@ -899,13 +902,17 @@ struct lua_Callbacks
     void (*debuginterrupt)(lua_State* L, lua_Debug* ar); // gets called when thread execution is interrupted by break in another thread
     void (*debugprotectederror)(lua_State* L);           // gets called when protected call results in an error
 
-    void (*onallocate)(lua_State* L, size_t osize, size_t nsize); // gets called when memory is allocated
+    // gets called after a heap object (or array) is allocated
+    void (*onallocate)(lua_State* L, void* block, size_t osize, size_t nsize, uint8_t memcat, int tt, int tag);
 
     // ServerLua: gets called before memory is allocated, return non-zero to fail the alloc. Only called for allocs in user memcats.
     int (*beforeallocate)(lua_State* L, size_t osize, size_t nsize);
 
     void (*preresume)(lua_State* L);  // gets called before lua_resume runs a (co)routine
     void (*postresume)(lua_State* L); // gets called after lua_resume returns (yield, return, or error)
+
+    // gets called before a heap object (or array) is freed
+    void (*onfree)(lua_State* L, void* block);
 };
 typedef struct lua_Callbacks lua_Callbacks;
 

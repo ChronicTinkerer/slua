@@ -72,6 +72,7 @@ LUAU_FASTFLAG(LuauCompileEmitVectorDouble)
 LUAU_FASTFLAG(LuauGcTraceUdata)
 LUAU_FASTFLAG(LuauEnumMoreEdges)
 LUAU_DYNAMIC_FASTFLAG(LuauTableMoveTimeoutFix)
+LUAU_FASTFLAG(LuauFastpcallInterrupt)
 LUAU_FASTFLAG(LuauMathRoundNegZero)
 LUAU_FASTFLAG(LuauEmitCallFeedback)
 LUAU_FASTFLAG(LuauCallFeedback)
@@ -4342,6 +4343,8 @@ return f, object
 
 TEST_CASE("Interrupt")
 {
+    ScopedFastFlag luauFastpcallInterrupt{FFlag::LuauFastpcallInterrupt, true};
+
     lua_CompileOptions copts = defaultOptions();
     copts.optimizationLevel = 1; // disable loop unrolling to get fixed expected hit results
 
@@ -4430,14 +4433,11 @@ TEST_CASE("Interrupt")
 
         index++;
 
-        if (index == 1'000)
-        {
-            index = 0;
+        if (index >= 1'000)
             luaL_error(L, "timeout");
-        }
     };
 
-    for (int test = 1; test <= 6; ++test)
+    for (int test = 1; test <= 7; ++test)
     {
         lua_State* T = lua_newthread(L);
 
@@ -4451,6 +4451,20 @@ TEST_CASE("Interrupt")
 
         lua_pop(L, 1);
     }
+
+    lua_callbacks(L)->interrupt = [](lua_State* L, int gc)
+    {
+        if (gc >= 0)
+            return;
+
+        index++;
+
+        if (index == 1'000)
+        {
+            index = 0;
+            luaL_error(L, "timeout");
+        }
+    };
 
     {
         lua_State* T = lua_newthread(L);
