@@ -4,7 +4,7 @@
 #include <set>
 
 #include "Luau/Bytecode.h"
-#include "Luau/DenseHash.h"
+#include "Luau/DenseHash2.h"
 #include "Luau/StringUtils.h"
 
 #include <string>
@@ -169,8 +169,9 @@ public:
 
     void annotateInstruction(std::string& result, uint32_t fid, uint32_t instpos) const;
 
-    void clearStringTable()
+    void clearStrings()
     {
+        debugStrings.clear();
         stringTable.clear();
     }
 
@@ -331,9 +332,9 @@ protected:
 
     bool hasLongJumps = false;
 
-    DenseHashMap<ConstantKey, int32_t, ConstantKeyHash> constantMap;
-    DenseHashMap<TableShape, int32_t, TableShapeHash> tableShapeMap;
-    DenseHashMap<uint32_t, int16_t> protoMap;
+    DenseHashMap2<ConstantKey, int32_t, ConstantKeyHash> constantMap;
+    DenseHashMap2<TableShape, int32_t, TableShapeHash> tableShapeMap;
+    DenseHashMap2<uint32_t, int16_t> protoMap;
 
     int debugLine = 0;
 
@@ -345,7 +346,7 @@ protected:
 
     std::vector<UserdataType> userdataTypes;
 
-    DenseHashMap<StringRef, unsigned int, StringRefHash> stringTable;
+    DenseHashMap2<StringRef, unsigned int, StringRefHash> stringTable;
     std::vector<StringRef> debugStrings;
 
     std::vector<std::pair<uint32_t, uint32_t>> debugRemarks;
