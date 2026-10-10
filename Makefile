@@ -135,7 +135,7 @@ LDFLAGS+=
 
 # some gcc versions treat var in `if (type var = val)` as unused
 # some gcc versions treat variables used in constexpr if blocks as unused
-# some gcc versions warn maybe uninitalized on optional<std::string> members on structs
+# some gcc versions warn maybe uninitialized on optional<std::string> members on structs
 ifeq ($(findstring g++,$(shell $(CXX) --version)),g++)
 	CXXFLAGS+=-Wno-unused
 	CXXFLAGS+=-Wno-maybe-uninitialized
@@ -269,7 +269,7 @@ clean:
 coverage: $(TESTS_TARGET) $(COMPILE_CLI_TARGET)
 	$(TESTS_TARGET) --fflags=true
 	mv default.profraw tests-flags.profraw
-	$(TESTS_TARGET) --fflags=true,DebugLuauDeferredConstraintResolution=true
+	$(TESTS_TARGET) --fflags=true,DebugLuauForceOldSolver=true
 	mv default.profraw tests-dcr.profraw
 	$(TESTS_TARGET) -ts=Conformance --codegen
 	mv default.profraw codegen.profraw

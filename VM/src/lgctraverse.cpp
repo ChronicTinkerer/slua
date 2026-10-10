@@ -258,44 +258,12 @@ static void traverseupval(ReachableContext* ctx, UpVal* uv)
 
 static void traverseclass(ReachableContext* ctx, LuauClass* lco)
 {
-    // Traverse class name
-    enqueueobj(ctx, obj2gco(lco->name));
-
-    // Traverse the name -> offset map
-    enqueueobj(ctx, obj2gco(lco->memberstooffset));
-
-    // Traverse member names
-    for (uint32_t i = 0; i < lco->numberofallmembers; ++i)
-        enqueueobj(ctx, obj2gco(lco->offsettomember[i]));
-
-    // Traverse static members. Instance member offsets come first, so the
-    // static members are the tail of the offset space.
-    for (uint32_t i = 0; i < lco->numberofallmembers - lco->numberofinstancemembers; ++i)
-    {
-        if (iscollectable(&lco->staticmembers[i]))
-            enqueueobj(ctx, gcvalue(&lco->staticmembers[i]));
-    }
-
-    // Traverse the class object's own metatable, then the one handed to its instances
-    enqueueobj(ctx, obj2gco(lco->metatable));
-
-    if (lco->instancemetatable)
-        enqueueobj(ctx, obj2gco(lco->instancemetatable));
+    LUAU_ASSERT_ALWAYS(!"Classes not supported");
 }
 
 static void traverseobject(ReachableContext* ctx, LuauObject* inst)
 {
-    // Traverse the class this is an instance of
-    enqueueobj(ctx, obj2gco(inst->lclass));
-
-    // Traverse instance members. The instance owns this array and its count,
-    // so use those rather than reaching through the class - same as
-    // `traverseobject` in lgc.cpp and `luaR_freeobject`.
-    for (uint32_t i = 0; i < inst->numberofmembers; ++i)
-    {
-        if (iscollectable(&inst->members[i]))
-            enqueueobj(ctx, gcvalue(&inst->members[i]));
-    }
+    LUAU_ASSERT_ALWAYS(!"Classes not supported");
 }
 
 static void traverseobj(ReachableContext* ctx, GCObject* o)

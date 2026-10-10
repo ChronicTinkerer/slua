@@ -232,7 +232,6 @@ struct FValueVersionSetter
 #define SLUA_REQUIRED_FFLAGS(X) \
     X("LuauIntegerType2") \
     X("LuauIntegerLibrary") \
-    X("LuauYieldIter2") \
     X("LuauXpcallFixMessageYieldPath")
 
 namespace Luau

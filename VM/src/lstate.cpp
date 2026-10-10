@@ -232,6 +232,9 @@ lua_State* lua_newstate(lua_Alloc f, void* ud)
     g->ptrenckey[1] = 0;
     g->ptrenckey[2] = 0;
     g->ptrenckey[3] = 0;
+    for (int i = 0; i < 8; i++)
+        g->ptrenckeynew[i] = 0;
+    g->ptrencactive = 0;
     g->strt.size = 0;
     g->strt.nuse = 0;
     g->strt.hash = NULL;
@@ -302,6 +305,9 @@ lua_State* lua_newstate(lua_Alloc f, void* ud)
 
     g->gcstats = GCStats();
     g->lastprotoid = 1;
+
+    g->builtinPcall = NULL;
+    g->builtinXpcall = NULL;
 
 #ifdef LUAI_GCMETRICS
     g->gcmetrics = GCMetrics();
