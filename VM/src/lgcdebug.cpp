@@ -17,7 +17,6 @@
 
 #include <unordered_set>
 LUAU_FASTFLAG(LuauCIProto)
-LUAU_FASTFLAG(LuauManagedDebugNames)
 LUAU_FASTFLAGVARIABLE(LuauEnumMoreEdges)
 
 static void validateobjref(global_State* g, GCObject* f, GCObject* t)
@@ -456,16 +455,8 @@ static void dumpclosure(FILE* f, Closure* cl)
 
     if (cl->isC)
     {
-        if (FFlag::LuauManagedDebugNames)
-        {
-            if (TString* str = cl->c.debugname)
-                fprintf(f, ",\"name\":\"%s\"", getstr(str));
-        }
-        else
-        {
-            if (cl->c.debugname_DEPRECATED)
-                fprintf(f, ",\"name\":\"%s\"", cl->c.debugname_DEPRECATED + 0);
-        }
+        if (TString* str = cl->c.debugname)
+            fprintf(f, ",\"name\":\"%s\"", getstr(str));
 
         if (cl->nupvalues)
         {
@@ -562,10 +553,7 @@ static void dumpthread(FILE* f, lua_State* th)
 
                 if (cl->isC)
                 {
-                    if (FFlag::LuauManagedDebugNames)
-                        fprintf(f, "\"frame:%s\"", cl->c.debugname ? getstr(cl->c.debugname) : "[C]");
-                    else
-                        fprintf(f, "\"frame:%s\"", cl->c.debugname_DEPRECATED ? cl->c.debugname_DEPRECATED : "[C]");
+                    fprintf(f, "\"frame:%s\"", cl->c.debugname ? getstr(cl->c.debugname) : "[C]");
                 }
                 else
                 {
@@ -955,12 +943,9 @@ static void enumclosure(EnumContext* ctx, Closure* cl)
 {
     if (cl->isC)
     {
-        if (FFlag::LuauManagedDebugNames)
-            enumnode(ctx, obj2gco(cl), sizeCclosure(cl->nupvalues), cl->c.debugname ? getstr(cl->c.debugname) : nullptr);
-        else
-            enumnode(ctx, obj2gco(cl), sizeCclosure(cl->nupvalues), cl->c.debugname_DEPRECATED);
+        enumnode(ctx, obj2gco(cl), sizeCclosure(cl->nupvalues), cl->c.debugname ? getstr(cl->c.debugname) : nullptr);
 
-        if (FFlag::LuauEnumMoreEdges && FFlag::LuauManagedDebugNames && cl->c.debugname)
+        if (FFlag::LuauEnumMoreEdges && cl->c.debugname)
             enumedge(ctx, obj2gco(cl), obj2gco(cl->c.debugname), "name");
     }
     else

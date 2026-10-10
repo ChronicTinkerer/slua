@@ -21,8 +21,6 @@
 #include "lstrbuf.h"
 #include "ltm.h"
 
-LUAU_FASTFLAG(LuauManagedDebugNames)
-
 struct Node
 {
     GCObject* gco;
@@ -93,16 +91,8 @@ static std::optional<std::string> gconame(GCObject *gco)
         Closure* cl = gco2cl(gco);
         if (cl->isC)
         {
-            if (FFlag::LuauManagedDebugNames)
-            {
-                if (cl->c.debugname)
-                    return std::string(getstr(cl->c.debugname));
-            }
-            else
-            {
-                if (cl->c.debugname_DEPRECATED)
-                    return std::string(cl->c.debugname_DEPRECATED);
-            }
+            if (cl->c.debugname)
+                return std::string(getstr(cl->c.debugname));
         }
         else
         {

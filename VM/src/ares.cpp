@@ -67,7 +67,6 @@ THE SOFTWARE.
 #include "Luau/ByteStream.h"
 
 LUAU_FASTFLAG(LuauCIProto)
-LUAU_FASTFLAG(LuauManagedDebugNames)
 
 /*
 ** {===========================================================================
@@ -701,6 +700,8 @@ ares_type_from_lua(Info *info, int type) {
     case LUA_TDEADKEY: return ARES_T_DEADKEY;
     case LUA_TPROTO: return ARES_T_PROTO;
     case LUA_TUPVAL: return ARES_T_UPVAL;
+    /* A count, never a tag on a live value. */
+    case LUA_T_ALL: break;
   }
   eris_error(info, ERIS_ERR_TYPEP, type);
 }
@@ -2471,14 +2472,10 @@ u_upval(Info *info) {                                                  /* ... */
 
 /** ======================================================================== */
 
-/* Which of the two fields holds the name depends on LuauManagedDebugNames,
- * exactly as in getfuncname(). May return NULL. */
+/* May return NULL. */
 static const char *
 cclosure_debugname(Closure *cl) {
-  if (FFlag::LuauManagedDebugNames) {
-    return cl->c.debugname ? getstr(cl->c.debugname) : NULL;
-  }
-  return cl->c.debugname_DEPRECATED;
+  return cl->c.debugname ? getstr(cl->c.debugname) : NULL;
 }
 
 /* For Lua closures we write the upvalue ID, which is usually the memory

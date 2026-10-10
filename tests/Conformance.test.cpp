@@ -8,7 +8,7 @@
 #include "luajitinliner.h"
 
 #include "Luau/BuiltinDefinitions.h"
-#include "Luau/DenseHash2.h"
+#include "Luau/DenseHash.h"
 #include "Luau/ModuleResolver.h"
 #include "Luau/TypeInfer.h"
 #include "Luau/BytecodeBuilder.h"
@@ -16,6 +16,8 @@
 #include "Luau/Compiler.h"
 #include "Luau/CodeGen.h"
 #include "Luau/BytecodeSummary.h"
+#include "Luau/BytecodeDump.h"
+#include "Luau/Parser.h"
 
 #include "doctest.h"
 #include "ScopedFlags.h"
@@ -65,7 +67,6 @@ LUAU_FASTFLAG(LuauIntegerType2)
 LUAU_FASTFLAG(DebugLuauForceOldSolver)
 LUAU_FASTFLAG(LuauCodegenBufferInteger)
 LUAU_FASTFLAG(LuauXpcallFixMessageYieldPath)
-LUAU_FASTFLAG(LuauCodegenFixBufferLenCheck)
 LUAU_FASTFLAG(LuauCodegenDseRestoreHintUpdate)
 LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
 LUAU_FASTFLAG(LuauCompileEmitVectorDouble)
@@ -79,6 +80,7 @@ LUAU_FASTFLAG(LuauCallFeedback)
 LUAU_FASTFLAG(LuauBytecodeCostModel)
 LUAU_FASTFLAG(LuauVirtualBcBuilder)
 LUAU_FASTFLAG(LuauNewPointerEncode)
+LUAU_FASTFLAG(DebugLuauIfLocalSyntax)
 
 #ifndef LUAU_CONFORMANCE_SOURCE_DIR
 // Walks up from the current directory looking for the Client folder,
@@ -250,6 +252,34 @@ int lua_silence(lua_State* L)
     return 0;
 }
 
+void validateBytecodeGraph(const std::string& source, const lua_CompileOptions& opts)
+{
+    Luau::Allocator allocator;
+    Luau::AstNameTable names(allocator);
+    Luau::ParseResult parseResult = Luau::Parser::parse(source.data(), source.size(), names, allocator);
+    REQUIRE(parseResult.errors.empty());
+
+    Luau::CompileOptions compileOptions;
+    memcpy(static_cast<void*>(&compileOptions), static_cast<const void*>(&opts), sizeof(opts));
+
+    Luau::BytecodeBuilder bcb;
+    Luau::compileOrThrow(bcb, parseResult, names, compileOptions);
+
+    std::vector<std::string_view> strings = bcb.getStringTable();
+    Luau::BytecodeBuilder reserialized;
+
+    for (uint32_t fid = 0; fid < bcb.getFunctionCount(); fid++)
+    {
+        if (auto optGraph = Luau::Bytecode::fromFunctionBytecode(bcb.getFunctionData(fid), strings))
+        {
+            std::string functionBytecode = Luau::Bytecode::toFunctionBytecode(reserialized, *optGraph);
+            REQUIRE_MESSAGE(!functionBytecode.empty(), "Failed to serialize function ", fid);
+
+            reserialized.clearStrings();
+        }
+    }
+}
+
 using StateRef = std::unique_ptr<lua_State, void (*)(lua_State*)>;
 
 static StateRef runConformance(
@@ -355,6 +385,8 @@ static StateRef runConformance(
 
     // note: luau_compile supports nullptr options, but we need to customize our defaults to improve test coverage
     lua_CompileOptions opts = options ? *options : defaultOptions();
+
+    validateBytecodeGraph(source, opts);
 
     size_t bytecodeSize = 0;
     char* bytecode = luau_compile(source.data(), source.size(), &opts, &bytecodeSize);
@@ -1884,7 +1916,6 @@ TEST_CASE("Math")
 TEST_CASE("Integers")
 {
     ScopedFastFlag ncgBufferInteger{FFlag::LuauCodegenBufferInteger, true};
-    ScopedFastFlag luauCodegenFixBufferLenCheck{FFlag::LuauCodegenFixBufferLenCheck, true};
 
     if (FFlag::LuauIntegerType2 && FFlag::LuauIntegerLibrary)
     {
@@ -2161,7 +2192,38 @@ TEST_CASE("JitInliner")
     ScopedFastFlag luauEmitCallFeedback{FFlag::LuauEmitCallFeedback, true};
     ScopedFastFlag luauBytecodeFold{FFlag::LuauBytecodeFold, true};
     ScopedFastFlag luauVirtualBuilder{FFlag::LuauVirtualBcBuilder, true};
-    runConformance("jit_inliner.luau", nullptr, nullptr, nullptr, nullptr, /*skipCodegen=*/true);
+    StateRef globalState = runConformance("jit_inliner.luau", nullptr, nullptr, nullptr, nullptr, /*skipCodegen=*/true);
+
+    lua_State* L = globalState.get();
+
+    static int index;
+
+    // Some of the regression tests include infinite loop test cases which trigger inlining
+    lua_callbacks(L)->interrupt = [](lua_State* L, int gc)
+    {
+        if (gc >= 0)
+            return;
+
+        index++;
+
+        if (index >= 1'000)
+            luaL_error(L, "timeout");
+    };
+
+    for (int test = 1; test <= 2; ++test)
+    {
+        lua_State* T = lua_newthread(L);
+
+        std::string name = "fuzzfail_infinite" + std::to_string(test);
+        lua_getglobal(T, name.c_str());
+
+        index = 0;
+        int status = lua_resume(T, nullptr, 0);
+        CHECK(status == LUA_ERRRUN);
+        CHECK(strstr(luaL_checkstring(T, -1), "timeout") != nullptr);
+
+        lua_pop(L, 1);
+    }
 }
 
 static bool blockableReallocAllowed = true;
@@ -3956,6 +4018,12 @@ TEST_CASE("IfElseExpression")
     runConformance("ifelseexpr.luau");
 }
 
+TEST_CASE("IfLocal")
+{
+    ScopedFastFlag sffs[] = {{FFlag::DebugLuauIfLocalSyntax, true}};
+    runConformance("iflocal.luau");
+}
+
 // Optionally returns debug info for the first Luau stack frame that is encountered on the callstack.
 static std::optional<lua_Debug> getFirstLuauFrameDebugInfo(lua_State* L)
 {
@@ -4111,7 +4179,7 @@ struct HeapEdge
 
 struct Heap
 {
-    Luau::DenseHashMap2<void*, HeapNode> nodes;
+    Luau::DenseHashMap<void*, HeapNode> nodes;
     std::vector<HeapEdge> edges;
 
     void link()
@@ -5359,8 +5427,6 @@ TEST_CASE("SafeEnv")
 
 TEST_CASE("Native")
 {
-    ScopedFastFlag luauCodegenFixBufferLenCheck{FFlag::LuauCodegenFixBufferLenCheck, true};
-
     // This tests requires code to run natively, otherwise all 'is_native' checks will fail
     if (!codegen || !luau_codegen_supported())
         return;
@@ -5632,6 +5698,8 @@ TEST_CASE("HugeFunction")
     luaL_openlibs(L);
     luaL_sandbox(L);
     luaL_sandboxthread(L);
+
+    validateBytecodeGraph(source, defaultOptions());
 
     size_t bytecodeSize = 0;
     char* bytecode = luau_compile(source.data(), source.size(), nullptr, &bytecodeSize);
@@ -6191,6 +6259,18 @@ TEST_CASE("CodegenRandomizeFunctionalCorrectness")
     REQUIRE_MESSAGE(callResult == 0, lua_tostring(L, -1));
 
     CHECK(lua_tonumber(L, -1) == 42.0);
+}
+
+// Ensure that we have bytecode output module linked in
+TEST_CASE("BytecodeDumpLinked")
+{
+    Luau::Bytecode::CompTimeBcFunction cbc{};
+
+    CHECK_EQ(toString(cbc, true), "; function() line 0 maxstacksize: 0 upvalues: 0 flags: 0\n");
+
+    Luau::Bytecode::BcFunction<TValue*> rbc{};
+
+    CHECK_EQ(toString(rbc, true), "; function() line 0 maxstacksize: 0 upvalues: 0 flags: 0\n");
 }
 
 TEST_SUITE_END();

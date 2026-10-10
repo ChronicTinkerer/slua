@@ -8,7 +8,7 @@
 #include "Luau/BytecodeBuilder.h"
 #include "Luau/ParseResult.h"
 #include "Luau/Compiler.h"
-#include "Luau/DenseHash2.h"
+#include "Luau/DenseHash.h"
 #include "Luau/StringUtils.h"
 #include "Luau/Type.h"
 #include "Luau/TypeFunction.h"
@@ -35,6 +35,7 @@ LUAU_FASTFLAGVARIABLE(LuauUdtfErrorHandling)
 LUAU_FASTFLAGVARIABLE(LuauUdtfCreateSingletonFixErrorMessage)
 LUAU_FASTFLAGVARIABLE(LuauUdtfTypeUseTaggedMetatable)
 LUAU_FASTFLAGVARIABLE(LuauUdtfTypeToStringMetamethod)
+LUAU_FASTFLAGVARIABLE(LuauUdtfFixTypeNameTypo)
 
 namespace Luau
 {
@@ -345,9 +346,10 @@ std::optional<TypeFunctionError> checkResultForError(lua_State* L, const char* t
                 Location{}, RuntimeError{format("'%s' type function errored at runtime: %s", typeFunctionName, lua_tostring(L, -1))}
             };
 
+        const char* tname = FFlag::LuauUdtfFixTypeNameTypo ? luaL_typename(L, -1) : lua_typename(L, -1);
         return TypeFunctionError{
             Location{},
-            RuntimeError{format("'%s' type function errored at runtime: raised an error of type %s", typeFunctionName, lua_typename(L, -1))}
+            RuntimeError{format("'%s' type function errored at runtime: raised an error of type %s", typeFunctionName, tname)}
         };
     }
 }
@@ -2593,8 +2595,8 @@ bool TypeFunctionProperty::isWriteOnly() const
 
 class TypeFunctionCloner
 {
-    using SeenTypes = DenseHashMap2<TypeFunctionTypeId, TypeFunctionTypeId>;
-    using SeenTypePacks = DenseHashMap2<TypeFunctionTypePackId, TypeFunctionTypePackId>;
+    using SeenTypes = DenseHashMap<TypeFunctionTypeId, TypeFunctionTypeId>;
+    using SeenTypePacks = DenseHashMap<TypeFunctionTypePackId, TypeFunctionTypePackId>;
 
     NotNull<TypeFunctionRuntime> typeFunctionRuntime;
 
