@@ -280,10 +280,12 @@ LUA_API void luau_dupcclosure(lua_State *L, int idx, const char *debugname);
 // ServerLua: For shrinking a table to use its minimum required capacity.
 LUA_API void luau_shrinktable(lua_State *L, int idx, int allow_reorder);
 
+typedef void (*lua_Destructor)(lua_State* L, void* userdata);
+
 LUA_API void lua_pushlightuserdatatagged(lua_State* L, void* p, int tag);
 LUA_API void* lua_newuserdatatagged(lua_State* L, size_t sz, int tag);
 LUA_API void* lua_newuserdatataggedwithmetatable(lua_State* L, size_t sz, int tag); // metatable fetched with lua_getuserdatametatable
-LUA_API void* lua_newuserdatadtor(lua_State* L, size_t sz, void (*dtor)(void*));
+LUA_API void* lua_newuserdatadtor(lua_State* L, size_t sz, lua_Destructor dtor);
 
 LUA_API void* lua_newbuffer(lua_State* L, size_t sz);
 
@@ -455,8 +457,6 @@ LUA_API double lua_cputime();
 LUA_API void lua_setrandomseed(lua_State* L, uint64_t seed);
 
 LUA_API void lua_setuserdatatag(lua_State* L, int idx, int tag);
-
-typedef void (*lua_Destructor)(lua_State* L, void* userdata);
 
 LUA_API void lua_setuserdatadtor(lua_State* L, int tag, lua_Destructor dtor);
 LUA_API lua_Destructor lua_getuserdatadtor(lua_State* L, int tag);

@@ -1600,7 +1600,8 @@ static void p_table(Info *info) {                                  /* ... tbl */
   const TValue *table_tv = luaA_toobject(info->L, -1);
   eris_assert(ttistable(table_tv));
   LuaTable* table = hvalue(table_tv);
-  WRITE_VALUE(table->readonly, uint8_t);
+  // The metamethod cache bit is a layout detail, rebuilt by lua_setreadonly() on load.
+  WRITE_VALUE(luaH_getreadonly(table), uint8_t);
   WRITE_VALUE(table->safeenv, uint8_t);
   int hash_size = (table->node == &luaH_dummynode) ? 0 : sizenode(table);
   WRITE_VALUE(table->sizearray, int);

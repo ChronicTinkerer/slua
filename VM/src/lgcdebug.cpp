@@ -18,6 +18,7 @@
 #include <unordered_set>
 LUAU_FASTFLAG(LuauCIProto)
 LUAU_FASTFLAGVARIABLE(LuauEnumMoreEdges)
+LUAU_FASTFLAG(LuauFrozenMetaButterfly)
 
 static void validateobjref(global_State* g, GCObject* f, GCObject* t)
 {
@@ -398,6 +399,9 @@ static void dumpstring(FILE* f, TString* ts, bool include_size)
 static void dumptable(FILE* f, LuaTable* h)
 {
     size_t size = sizeof(LuaTable) + (h->node == &luaH_dummynode ? 0 : sizenode(h) * sizeof(LuaNode)) + h->sizearray * sizeof(TValue);
+
+    if (FFlag::LuauFrozenMetaButterfly && hasmetacache(h))
+        size += TM_N * sizeof(TValue);
 
     fprintf(f, "{\"type\":\"table\",\"cat\":%d,\"size\":%d", h->memcat, int(size));
 
@@ -855,6 +859,9 @@ static void enumstring(EnumContext* ctx, TString* ts)
 static void enumtable(EnumContext* ctx, LuaTable* h)
 {
     size_t size = sizeof(LuaTable) + (h->node == &luaH_dummynode ? 0 : sizenode(h) * sizeof(LuaNode)) + h->sizearray * sizeof(TValue);
+
+    if (FFlag::LuauFrozenMetaButterfly && hasmetacache(h))
+        size += TM_N * sizeof(TValue);
 
     // Provide a name for a special registry table
     // ServerLua: and also a few other things we care about.

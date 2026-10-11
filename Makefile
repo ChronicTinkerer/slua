@@ -245,7 +245,7 @@ $(HARNESS_CLI_TARGET): LDFLAGS+=-lpthread $(LIBRT)
 fuzz-proto fuzz-prototest: LDFLAGS+=$(LPROTOBUF)
 
 # pseudo targets
-.PHONY: all test clean coverage format luau-size aliases build-mutator-libs
+.PHONY: all test golden clean coverage format luau-size aliases build-mutator-libs
 
 # Explicitly make 'all' the default goal ensuring that even if targets are added before 'all', they won't
 # implicitly become the default target built by make.
@@ -255,8 +255,12 @@ all: $(REPL_CLI_TARGET) $(ANALYZE_CLI_TARGET) $(TESTS_TARGET) aliases
 
 aliases: $(EXECUTABLE_ALIASES)
 
-test: $(TESTS_TARGET) $(TEST_LINK_VM_TARGET) $(TEST_LINK_CODEGEN_TARGET)
+test: $(TESTS_TARGET) $(TEST_LINK_VM_TARGET) $(TEST_LINK_CODEGEN_TARGET) golden
 	$(TESTS_TARGET) $(TESTS_ARGS)
+
+golden: slua slua-analyze
+	python3 -m tools.golden.selftest --luau $(abspath slua) --luau-analyze $(abspath slua-analyze)
+	python3 -m tools.golden --luau $(abspath slua) --luau-analyze $(abspath slua-analyze)
 
 conformance: $(TESTS_TARGET)
 	$(TESTS_TARGET) $(TESTS_ARGS) -ts=Conformance

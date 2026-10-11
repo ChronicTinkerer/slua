@@ -256,14 +256,38 @@ static void traverseupval(ReachableContext* ctx, UpVal* uv)
         enqueueobj(ctx, gcvalue(uv->v));
 }
 
+// Mirrors traverseclass in lgc.cpp
 static void traverseclass(ReachableContext* ctx, LuauClass* lco)
 {
-    LUAU_ASSERT_ALWAYS(!"Classes not supported");
+    enqueueobj(ctx, obj2gco(lco->name));
+    if (lco->super)
+        enqueueobj(ctx, obj2gco(lco->super));
+    enqueueobj(ctx, obj2gco(lco->memberstooffset));
+
+    for (uint32_t i = 0; i < lco->numberofallmembers; ++i)
+        enqueueobj(ctx, obj2gco(lco->offsettomember[i]));
+
+    uint32_t numberofstaticmembers = lco->numberofallmembers - lco->numberofinstancemembers;
+    for (uint32_t i = 0; i < numberofstaticmembers; ++i)
+    {
+        if (iscollectable(&lco->staticmembers[i]))
+            enqueueobj(ctx, gcvalue(&lco->staticmembers[i]));
+    }
+
+    if (lco->instancemetatable)
+        enqueueobj(ctx, obj2gco(lco->instancemetatable));
 }
 
+// Mirrors traverseobject in lgc.cpp
 static void traverseobject(ReachableContext* ctx, LuauObject* inst)
 {
-    LUAU_ASSERT_ALWAYS(!"Classes not supported");
+    enqueueobj(ctx, obj2gco(inst->lclass));
+
+    for (uint32_t i = 0; i < inst->numberofmembers; ++i)
+    {
+        if (iscollectable(&inst->members[i]))
+            enqueueobj(ctx, gcvalue(&inst->members[i]));
+    }
 }
 
 static void traverseobj(ReachableContext* ctx, GCObject* o)
