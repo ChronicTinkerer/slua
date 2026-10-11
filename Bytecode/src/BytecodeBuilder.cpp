@@ -2386,14 +2386,14 @@ void BytecodeBuilder::tagYieldPoints()
 
     Function& func = functions[currentFunction];
 
-    for (int i = 0; i < insns.size();)
+    for (size_t i = 0; i < insns.size();)
     {
         uint32_t insn = insns[i];
         auto op = LuauOpcode(LUAU_INSN_OP(insn));
 
         if (luau_is_preemptible(op))
         {
-            func.yieldpoints.insert(i);
+            func.yieldpoints.insert((int)i);
             if (op == LOP_CALL)
             {
                 // calls are weird, sometimes savedpc will be just past
