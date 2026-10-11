@@ -472,8 +472,11 @@ Proto* onInlineFunction(lua_State* L, Closure* caller, Closure* target, uint32_t
 
     std::vector<Proto*> protos;
     protos.resize(callerProto->sizep + targetProto->sizep);
-    memcpy(protos.data(), callerProto->p, callerProto->sizep * sizeof(Proto*));
-    memcpy(protos.data() + callerProto->sizep, targetProto->p, targetProto->sizep * sizeof(Proto*));
+    // ServerLua: guarded to satisfy UBSan, Proto::p is null when sizep is 0
+    if (callerProto->sizep)
+        memcpy(protos.data(), callerProto->p, callerProto->sizep * sizeof(Proto*));
+    if (targetProto->sizep)
+        memcpy(protos.data() + callerProto->sizep, targetProto->p, targetProto->sizep * sizeof(Proto*));
 
     if (std::optional<CodeData> codeData = emitCode(L, callerGraph->first, protos))
     {
