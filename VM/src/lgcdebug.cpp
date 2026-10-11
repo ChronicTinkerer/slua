@@ -16,7 +16,7 @@
 #include <stdio.h>
 
 #include <unordered_set>
-LUAU_FASTFLAG(LuauCIProto)
+
 LUAU_FASTFLAGVARIABLE(LuauEnumMoreEdges)
 LUAU_FASTFLAG(LuauFrozenMetaButterfly)
 
@@ -193,6 +193,8 @@ static void validateclass(global_State* g, LuauClass* lco)
         if (i >= lco->numberofinstancemembers)
             validateref(g, obj, &lco->staticmembers[i - lco->numberofinstancemembers]);
     }
+    if (lco->metatable)
+        validateobjref(g, obj, obj2gco(lco->metatable));
     if (lco->instancemetatable)
         validateobjref(g, obj, obj2gco(lco->instancemetatable));
 }
@@ -516,26 +518,21 @@ static void dumpthread(FILE* f, lua_State* th)
         dumpref(f, obj2gco(th->finalizers));
     }
 
-    Closure* tcl = 0;
     Proto* cip = nullptr;
     for (CallInfo* ci = th->base_ci; ci <= th->ci; ++ci)
     {
         if (ttisfunction(ci->func))
         {
-            tcl = clvalue(ci->func);
-            if (FFlag::LuauCIProto)
-                cip = ci->p;
+            cip = ci->p;
             break;
         }
     }
 
-    if (FFlag::LuauCIProto ? (cip != nullptr && cip->source) : (tcl && !tcl->isC && tcl->l.p->source))
+    if (cip != nullptr && cip->source)
     {
-        Proto* p = FFlag::LuauCIProto ? cip : tcl->l.p;
-
         fprintf(f, ",\"source\":\"");
-        dumpstringdata(f, p->source->data, p->source->len);
-        fprintf(f, "\",\"line\":%d", p->linedefined);
+        dumpstringdata(f, cip->source->data, cip->source->len);
+        fprintf(f, "\",\"line\":%d", cip->linedefined);
     }
 
     if (th->top > th->stack)
@@ -570,7 +567,7 @@ static void dumpthread(FILE* f, lua_State* th)
                 }
                 else
                 {
-                    Proto* p = FFlag::LuauCIProto ? ci->p : cl->l.p;
+                    Proto* p = ci->p;
                     fprintf(f, "\"frame:");
                     if (p->source)
                         dumpstringdata(f, p->source->data, p->source->len);
@@ -579,7 +576,7 @@ static void dumpthread(FILE* f, lua_State* th)
             }
             else if (isLua(ci))
             {
-                Proto* p = FFlag::LuauCIProto ? ci->p : ci_func(ci)->l.p;
+                Proto* p = ci->p;
                 int pc = pcRel(ci->savedpc, p);
                 const LocVar* var = luaF_findlocal(p, int(v - ci->base), pc);
 
@@ -669,6 +666,11 @@ static void dumpclass(FILE* f, LuauClass* lco)
     }
     fprintf(f, R"(],"staticmembers":[)");
     dumprefs(f, lco->staticmembers, lco->numberofallmembers - lco->numberofinstancemembers);
+    fprintf(f, R"(],"metatable":)");
+    if (lco->metatable)
+        dumpref(f, obj2gco(lco->metatable));
+    else
+        fprintf(f, "null");
     fprintf(f, R"(,"instancemetatable":)");
     if (lco->instancemetatable)
         dumpref(f, obj2gco(lco->instancemetatable));
@@ -1032,22 +1034,19 @@ static void enumthread(EnumContext* ctx, lua_State* th)
 {
     size_t size = sizeof(lua_State) + sizeof(TValue) * th->stacksize + sizeof(CallInfo) * th->size_ci;
 
-    Closure* tcl = NULL;
     Proto* cip = NULL;
     for (CallInfo* ci = th->base_ci; ci <= th->ci; ++ci)
     {
         if (ttisfunction(ci->func))
         {
-            tcl = clvalue(ci->func);
-            if (FFlag::LuauCIProto)
-                cip = ci->p;
+            cip = ci->p;
             break;
         }
     }
 
-    if (FFlag::LuauCIProto ? (cip && cip->source) : (tcl && !tcl->isC && tcl->l.p->source))
+    if (cip && cip->source)
     {
-        Proto* p = (FFlag::LuauCIProto ? cip : tcl->l.p);
+        Proto* p = cip;
 
         char buf[LUA_IDSIZE];
 
@@ -1169,6 +1168,9 @@ static void enumclass(EnumContext* ctx, LuauClass* lco)
 
     for (uint32_t i = 0; i < lco->numberofallmembers; i++)
         enumedge(ctx, obj, obj2gco(lco->offsettomember[i]), "membername");
+
+    if (lco->metatable)
+        enumedge(ctx, obj, obj2gco(lco->metatable), "metatable");
 
     if (FFlag::LuauEnumMoreEdges && lco->instancemetatable)
         enumedge(ctx, obj, obj2gco(lco->instancemetatable), "instancemetatable");

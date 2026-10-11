@@ -23,7 +23,6 @@
 // ServerLua: used to detect __iter = pairs for native iteration fast-path
 LUAI_FUNC int luaB_pairs(lua_State* L);
 
-LUAU_FASTFLAGVARIABLE(LuauCIProto)
 LUAU_FASTFLAGVARIABLE(DebugLuauUserDefinedClassesRuntime)
 LUAU_FASTFLAGVARIABLE(LuauCallFeedback)
 LUAU_FASTFLAGVARIABLE(LuauPromoteProto)
@@ -96,10 +95,10 @@ LUAU_FASTFLAGVARIABLE(LuauFastpcallInterrupt)
 // a cheaper version of VM_PROTECT that can be called before the external call.
 #define VM_PROTECT_PC() L->ci->savedpc = pc
 #define VM_ASSERT_PC(pc) \
-    LUAU_ASSERT(unsigned(pc - (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->code) < unsigned((FFlag::LuauCIProto ? L->ci->p : cl->l.p)->sizecode));
+    LUAU_ASSERT(unsigned(pc - L->ci->p->code) < unsigned(L->ci->p->sizecode));
 
 #define VM_REG(i) (LUAU_ASSERT(unsigned(i) < unsigned(L->top - base)), &base[i])
-#define VM_KV(i) (LUAU_ASSERT(unsigned(i) < unsigned((FFlag::LuauCIProto ? L->ci->p : cl->l.p)->sizek)), &k[i])
+#define VM_KV(i) (LUAU_ASSERT(unsigned(i) < unsigned(L->ci->p->sizek)), &k[i])
 #define VM_UV(i) (LUAU_ASSERT(unsigned(i) < unsigned(cl->nupvalues)), &cl->l.uprefs[i])
 
 #define VM_PATCH_OP(pc, op) *const_cast<Instruction*>(pc) = (uint8_t(op) | (0xffffff00u & *(pc)))
@@ -201,7 +200,7 @@ LUAU_NOINLINE void luau_callhook(lua_State* L, lua_Hook hook, void* userdata)
     // this needs to be called before luaD_checkstack in case it fails to reallocate stack
     const Instruction* oldsavedpc = L->ci->savedpc;
 
-    if (L->ci->savedpc && L->ci->savedpc != (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->code + (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->sizecode)
+    if (L->ci->savedpc && L->ci->savedpc != L->ci->p->code + L->ci->p->sizecode)
         L->ci->savedpc++;
 
     luaD_checkstack(L, LUA_MINSTACK); // ensure minimum stack size
@@ -210,7 +209,7 @@ LUAU_NOINLINE void luau_callhook(lua_State* L, lua_Hook hook, void* userdata)
 
     lua_Debug ar;
     ar.currentline =
-        cl->isC ? -1 : luaG_getline((FFlag::LuauCIProto ? L->ci->p : cl->l.p), pcRel(L->ci->savedpc, (FFlag::LuauCIProto ? L->ci->p : cl->l.p)));
+        cl->isC ? -1 : luaG_getline(L->ci->p, pcRel(L->ci->savedpc, L->ci->p));
     ar.userdata = userdata;
 
     hook(L, &ar);
@@ -247,8 +246,7 @@ static LUAU_NOINLINE void luau_setupcci(lua_State* L, int nresults, StkId fun)
     CallInfo* ci = incr_ci(L);
 
     ci->func = fun;
-    if (FFlag::LuauCIProto)
-        ci->p = getproto(clvalue(fun));
+    ci->p = getproto(clvalue(fun));
     ci->base = fun + 1;
     ci->top = L->top + LUA_MINSTACK;
     ci->savedpc = NULL;
@@ -313,7 +311,7 @@ static void luau_execute(lua_State* L)
 #if VM_HAS_NATIVE
     if ((L->ci->flags & LUA_CALLINFO_NATIVE) && !SingleStep)
     {
-        Proto* p = FFlag::LuauCIProto ? L->ci->p : clvalue(L->ci->func)->l.p;
+        Proto* p = L->ci->p;
         LUAU_ASSERT(p->execdata);
 
         if (L->global->ecb.enter(L, p) == 0)
@@ -324,12 +322,12 @@ reentry:
 #endif
 
     LUAU_ASSERT(isLua(L->ci));
-    LUAU_ASSERT(!FFlag::LuauCIProto || L->ci->p != nullptr);
+    LUAU_ASSERT(L->ci->p != nullptr);
 
     pc = L->ci->savedpc;
     cl = clvalue(L->ci->func);
     base = L->base;
-    k = FFlag::LuauCIProto ? L->ci->p->k : cl->l.p->k;
+    k = L->ci->p->k;
 
     VM_NEXT(); // starts the interpreter "loop"
 
@@ -968,8 +966,8 @@ reentry:
                 VM_CASE_INSTRUCTION insn = *pc++;
                 VM_CASE_STKID ra = VM_REG(LUAU_INSN_A(insn));
 
-                Proto* pv = (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->p[LUAU_INSN_D(insn)];
-                LUAU_ASSERT(unsigned(LUAU_INSN_D(insn)) < unsigned((FFlag::LuauCIProto ? L->ci->p : cl->l.p)->sizep));
+                Proto* pv = L->ci->p->p[LUAU_INSN_D(insn)];
+                LUAU_ASSERT(unsigned(LUAU_INSN_D(insn)) < unsigned(L->ci->p->sizep));
 
                 VM_PROTECT_PC(); // luaF_newLclosure may fail due to OOM
 
@@ -1176,8 +1174,7 @@ reentry:
 
                 CallInfo* ci = incr_ci(L);
                 ci->func = ra;
-                if (FFlag::LuauCIProto)
-                    ci->p = getproto(ccl);
+                ci->p = getproto(ccl);
                 ci->base = ra + 1;
                 ci->top = argtop + ccl->stacksize; // note: technically UB since we haven't reallocated the stack yet
                 ci->savedpc = NULL;
@@ -1307,8 +1304,7 @@ reentry:
 
                 CallInfo* ci = incr_ci(L);
                 ci->func = ra;
-                if (FFlag::LuauCIProto)
-                    ci->p = getproto(ccl);
+                ci->p = getproto(ccl);
                 ci->base = ra + 1;
                 ci->top = argtop + ccl->stacksize; // note: technically UB since we haven't reallocated the stack yet
                 ci->savedpc = NULL;
@@ -1453,8 +1449,8 @@ reentry:
                 LUAU_ASSERT(isLua(L->ci));
 
                 Closure* nextcl = clvalue(cip->func);
-                LUAU_ASSERT(!FFlag::LuauCIProto || cip->p != nullptr);
-                Proto* nextproto = FFlag::LuauCIProto ? cip->p : nextcl->l.p;
+                LUAU_ASSERT(cip->p != nullptr);
+                Proto* nextproto = cip->p;
 
 #if VM_HAS_NATIVE
                 if (LUAU_UNLIKELY((cip->flags & LUA_CALLINFO_NATIVE) && !SingleStep))
@@ -3253,7 +3249,7 @@ reentry:
 
             VM_CASE(LOP_NATIVECALL)
             {
-                Proto* p = (FFlag::LuauCIProto ? L->ci->p : cl->l.p);
+                Proto* p = L->ci->p;
                 LUAU_ASSERT(p->execdata);
 
                 CallInfo* ci = L->ci;
@@ -3280,7 +3276,7 @@ reentry:
             {
                 VM_CASE_INSTRUCTION insn = *pc++;
                 int b = LUAU_INSN_B(insn) - 1;
-                int n = cast_int(base - L->ci->func) - (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->numparams - 1;
+                int n = cast_int(base - L->ci->func) - L->ci->p->numparams - 1;
 
                 if (b == LUA_MULTRET)
                 {
@@ -3318,7 +3314,7 @@ reentry:
                 // clone closure if the environment is not shared
                 // note: we save closure to stack early in case the code below wants to capture it by value
                 Closure* ncl =
-                    (kcl->env == cl->env) ? kcl : luaF_newLclosure(L, kcl->nupvalues, cl->env, FFlag::LuauCIProto ? getproto(kcl) : kcl->l.p);
+                    (kcl->env == cl->env) ? kcl : luaF_newLclosure(L, kcl->nupvalues, cl->env, getproto(kcl));
                 setclvalue(L, ra, ncl);
 
                 // this loop does three things:
@@ -3341,7 +3337,7 @@ reentry:
                     // lazily clone the closure and update the upvalues
                     if (ncl == kcl && kcl->preload == 0)
                     {
-                        ncl = luaF_newLclosure(L, kcl->nupvalues, cl->env, FFlag::LuauCIProto ? getproto(kcl) : kcl->l.p);
+                        ncl = luaF_newLclosure(L, kcl->nupvalues, cl->env, getproto(kcl));
                         setclvalue(L, ra, ncl);
 
                         ui = -1; // restart the loop to fill all upvalues
@@ -3763,9 +3759,9 @@ reentry:
 
             VM_CASE(LOP_BREAK)
             {
-                LUAU_ASSERT((FFlag::LuauCIProto ? L->ci->p : cl->l.p)->debuginsn);
+                LUAU_ASSERT(L->ci->p->debuginsn);
 
-                uint8_t op = (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->debuginsn[unsigned(pc - (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->code)];
+                uint8_t op = L->ci->p->debuginsn[unsigned(pc - L->ci->p->code)];
                 LUAU_ASSERT(op != LOP_BREAK);
 
                 if (L->global->cb.debugbreak)
@@ -4192,7 +4188,7 @@ reentry:
                     L->ci->flags |= LUA_CALLINFO_RETURN;
 
                     Closure* fcl = clvalue(L->ci->func);
-                    Proto* p = FFlag::LuauCIProto ? L->ci->p : fcl->l.p;
+                    Proto* p = L->ci->p;
 
                     // reentry into the call (see LOP_CALL for description of how native calls are handled with 'codeentry')
                     pc = SingleStep ? p->code : p->codeentry;
@@ -4225,14 +4221,13 @@ reentry:
                 uint32_t aux = *pc++;
                 TValue* kv = VM_KV(aux);
 
+                VM_PROTECT_PC();
                 LuauClass* newcls = luaR_cloneclass(L, classvalue(kv));
                 setclassvalue(L, ra, newcls);
                 newcls->isopen = (LUAU_INSN_C(insn) & 0x1u) != 0; // bottom bit of C is the isopen flag
 
                 if (super != 0xff)
                 {
-                    VM_PROTECT_PC();
-
                     VM_CASE_STKID rb = VM_REG(super);
 
                     if (LUAU_UNLIKELY(!ttisclass(rb)))
@@ -4268,7 +4263,6 @@ void luau_finishop(lua_State* L)
     CallInfo* ci = L->ci;
     ci->flags &= ~LUA_CALLINFO_OPYIELD;
 
-    Closure* cl = clvalue(L->ci->func);
     StkId base = L->base;
 
     const Instruction* pc = ci->savedpc;
@@ -4308,8 +4302,7 @@ int luau_precall(lua_State* L, StkId func, int nresults)
 
     CallInfo* ci = incr_ci(L);
     ci->func = func;
-    if (FFlag::LuauCIProto)
-        ci->p = getproto(ccl);
+    ci->p = getproto(ccl);
     ci->base = func + 1;
     ci->top = L->top + ccl->stacksize;
     ci->savedpc = NULL;

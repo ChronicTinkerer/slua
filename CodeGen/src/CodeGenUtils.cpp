@@ -23,7 +23,6 @@
 LUAI_FUNC int luaB_pairs(lua_State* L);
 
 LUAU_FASTFLAGVARIABLE(LuauNativeCodeTargetCheck)
-LUAU_FASTFLAG(LuauCIProto)
 LUAU_FASTFLAG(LuauPromoteProto)
 
 // All external function calls that can cause stack realloc or Lua calls have to be wrapped in VM_PROTECT
@@ -44,7 +43,7 @@ LUAU_FASTFLAG(LuauPromoteProto)
 #define VM_PROTECT_PC() L->ci->savedpc = pc
 
 #define VM_REG(i) (LUAU_ASSERT(unsigned(i) < unsigned(L->top - base)), &base[i])
-#define VM_KV(i) (LUAU_ASSERT(unsigned(i) < unsigned((FFlag::LuauCIProto ? L->ci->p : cl->l.p)->sizek)), &k[i])
+#define VM_KV(i) (LUAU_ASSERT(unsigned(i) < unsigned(L->ci->p->sizek)), &k[i])
 #define VM_UV(i) (LUAU_ASSERT(unsigned(i) < unsigned(cl->nupvalues)), &cl->l.uprefs[i])
 
 #define VM_PATCH_C(pc, slot) *const_cast<Instruction*>(pc) = ((uint8_t(slot) << 24) | (0x00ffffffu & *(pc)))
@@ -225,13 +224,7 @@ void forgPrepXnextFallback(lua_State* L, TValue* ra, int pc)
 {
     if (!ttisfunction(ra))
     {
-        if (FFlag::LuauCIProto)
-            L->ci->savedpc = L->ci->p->code + pc;
-        else
-        {
-            Closure* cl = clvalue(L->ci->func);
-            L->ci->savedpc = cl->l.p->code + pc;
-        }
+        L->ci->savedpc = L->ci->p->code + pc;
 
         luaG_typeerror(L, ra, "iterate over");
     }
@@ -249,8 +242,7 @@ Closure* callProlog(lua_State* L, TValue* ra, StkId argtop, int nresults)
     Closure* ccl = clvalue(ra);
 
     CallInfo* ci = incr_ci(L);
-    if (FFlag::LuauCIProto)
-        ci->p = getproto(ccl);
+    ci->p = getproto(ccl);
     ci->func = ra;
     ci->base = ra + 1;
     ci->top = argtop + ccl->stacksize; // note: technically UB since we haven't reallocated the stack yet
@@ -315,20 +307,10 @@ LuauVector* newVector(lua_State* L, double x, double y, double z)
 
 void getImport(lua_State* L, StkId res, unsigned id, unsigned pc)
 {
-    if (FFlag::LuauCIProto)
-    {
-        Proto* p = L->ci->p;
-        L->ci->savedpc = p->code + pc;
+    Proto* p = L->ci->p;
+    L->ci->savedpc = p->code + pc;
 
-        luaV_getimport(L, clvalue(L->ci->func)->env, p->k, res, id, /*propagatenil*/ false);
-    }
-    else
-    {
-        Closure* cl = clvalue(L->ci->func);
-        L->ci->savedpc = cl->l.p->code + pc;
-
-        luaV_getimport(L, cl->env, cl->l.p->k, res, id, /*propagatenil*/ false);
-    }
+    luaV_getimport(L, clvalue(L->ci->func)->env, p->k, res, id, /*propagatenil*/ false);
 }
 
 // Extracted as-is from lvmexecute.cpp with the exception of control flow (reentry) and removed interrupts/savedpc
@@ -344,8 +326,7 @@ Closure* callFallback(lua_State* L, StkId ra, StkId argtop, int nresults)
     Closure* ccl = clvalue(ra);
 
     CallInfo* ci = incr_ci(L);
-    if (FFlag::LuauCIProto)
-        ci->p = getproto(ccl);
+    ci->p = getproto(ccl);
     ci->func = ra;
     ci->base = ra + 1;
     ci->top = argtop + ccl->stacksize; // note: technically UB since we haven't reallocated the stack yet
@@ -906,14 +887,14 @@ const Instruction* executeFORGPREP(lua_State* L, const Instruction* pc, StkId ba
     }
 
     pc += LUAU_INSN_D(insn);
-    LUAU_ASSERT(unsigned(pc - (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->code) < unsigned((FFlag::LuauCIProto ? L->ci->p : cl->l.p)->sizecode));
+    LUAU_ASSERT(unsigned(pc - L->ci->p->code) < unsigned(L->ci->p->sizecode));
     return pc;
 }
 
 void executeGETVARARGSMultRet(lua_State* L, const Instruction* pc, StkId base, int rai)
 {
     [[maybe_unused]] Closure* cl = clvalue(L->ci->func);
-    int n = cast_int(base - L->ci->func) - (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->numparams - 1;
+    int n = cast_int(base - L->ci->func) - L->ci->p->numparams - 1;
 
     VM_PROTECT(luaD_checkstack(L, n));
     StkId ra = VM_REG(rai); // previous call may change the stack
@@ -927,7 +908,7 @@ void executeGETVARARGSMultRet(lua_State* L, const Instruction* pc, StkId base, i
 void executeGETVARARGSConst(lua_State* L, StkId base, int rai, int b)
 {
     [[maybe_unused]] Closure* cl = clvalue(L->ci->func);
-    int n = cast_int(base - L->ci->func) - (FFlag::LuauCIProto ? L->ci->p : cl->l.p)->numparams - 1;
+    int n = cast_int(base - L->ci->func) - L->ci->p->numparams - 1;
 
     StkId ra = VM_REG(rai);
 
@@ -950,7 +931,7 @@ const Instruction* executeDUPCLOSURE(lua_State* L, const Instruction* pc, StkId 
 
     // clone closure if the environment is not shared
     // note: we save closure to stack early in case the code below wants to capture it by value
-    Closure* ncl = (kcl->env == cl->env) ? kcl : luaF_newLclosure(L, kcl->nupvalues, cl->env, FFlag::LuauCIProto ? getproto(kcl) : kcl->l.p);
+    Closure* ncl = (kcl->env == cl->env) ? kcl : luaF_newLclosure(L, kcl->nupvalues, cl->env, getproto(kcl));
     setclvalue(L, ra, ncl);
 
     // this loop does three things:
@@ -973,7 +954,7 @@ const Instruction* executeDUPCLOSURE(lua_State* L, const Instruction* pc, StkId 
         // lazily clone the closure and update the upvalues
         if (ncl == kcl && kcl->preload == 0)
         {
-            ncl = luaF_newLclosure(L, kcl->nupvalues, cl->env, FFlag::LuauCIProto ? getproto(kcl) : kcl->l.p);
+            ncl = luaF_newLclosure(L, kcl->nupvalues, cl->env, getproto(kcl));
             setclvalue(L, ra, ncl);
 
             ui = -1; // restart the loop to fill all upvalues

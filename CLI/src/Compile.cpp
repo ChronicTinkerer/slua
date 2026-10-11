@@ -17,6 +17,8 @@
 
 #include <memory>
 
+#include <stdlib.h>
+
 #ifdef _WIN32
 #include <io.h>
 #include <fcntl.h>

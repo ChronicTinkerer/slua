@@ -66,7 +66,6 @@ THE SOFTWARE.
 #include "Luau/BytecodeWire.h"
 #include "Luau/ByteStream.h"
 
-LUAU_FASTFLAG(LuauCIProto)
 
 /*
 ** {===========================================================================
@@ -2939,10 +2938,8 @@ p_thread(Info *info) {                                          /* ... thread */
 
     if (eris_isLua(ci)) {
       WRITE_VALUE(ERIS_CI_KIND_LUA, uint8_t);
-      const Closure *lcl = eris_ci_func(ci);
-
       // savedpc is relative to the frame's proto, not the closure's current one.
-      const Proto *p = FFlag::LuauCIProto ? ci->p : lcl->l.p;
+      const Proto *p = ci->p;
 
       // Inliner output: regenerated at runtime, so no yieldpoints and pcs that mean
       // nothing once reloaded.
