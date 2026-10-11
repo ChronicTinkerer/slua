@@ -25,6 +25,7 @@ LUAU_FASTFLAG(LuauNewTypePathErrorMessages)
 LUAU_FASTFLAG(LuauRefactorStringSemanticSubtyping)
 LUAU_FASTFLAG(DebugLuauParseExactTables)
 LUAU_FASTFLAG(DebugLuauExactTableTypes)
+LUAU_FASTFLAG(LuauSubtypingSkipUnreadReasoning)
 
 using namespace Luau;
 
@@ -1467,6 +1468,35 @@ TEST_CASE_FIXTURE(SubtypeFixture, "Classes are subtypes of themselves")
     CHECK_IS_SUBTYPE(b, b);
 }
 
+TEST_CASE_FIXTURE(SubtypeFixture, "user-defined class inheritance: grandchild <: grandparent")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+    TypeId grandparent = userDefinedCls("Grandparent");
+    TypeId parent = userDefinedCls("Parent", grandparent);
+    TypeId child = userDefinedCls("Child", parent);
+
+    CHECK_IS_SUBTYPE(child, parent);
+    CHECK_IS_SUBTYPE(child, grandparent);
+    CHECK_IS_SUBTYPE(parent, grandparent);
+
+    CHECK_IS_NOT_SUBTYPE(parent, child);
+    CHECK_IS_NOT_SUBTYPE(grandparent, parent);
+    CHECK_IS_NOT_SUBTYPE(grandparent, child);
+}
+
+TEST_CASE_FIXTURE(SubtypeFixture, "user-defined class inheritance: siblings are not subtypes of each other")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauUserDefinedClasses, true};
+    TypeId parent = userDefinedCls("Parent");
+    TypeId childOne = userDefinedCls("ChildOne", parent);
+    TypeId childTwo = userDefinedCls("ChildTwo", parent);
+
+    CHECK_IS_SUBTYPE(childOne, parent);
+    CHECK_IS_SUBTYPE(childTwo, parent);
+    CHECK_IS_NOT_SUBTYPE(childOne, childTwo);
+    CHECK_IS_NOT_SUBTYPE(childTwo, childOne);
+}
+
 TEST_CASE_FIXTURE(SubtypeFixture, "Child & AnotherChild <: number")
 {
     CHECK_IS_SUBTYPE(meet(childClass, anotherChildClass), getBuiltins()->numberType);
@@ -2249,6 +2279,15 @@ TEST_CASE_FIXTURE(SubtypeFixture, "multiple_reasonings")
                                                    /* variance */ SubtypingVariance::Invariant},
                             }
     );
+}
+
+TEST_CASE_FIXTURE(SubtypeFixture, "successful_subtyping_has_no_reasoning")
+{
+    ScopedFastFlag sff{FFlag::LuauSubtypingSkipUnreadReasoning, true};
+
+    SubtypingResult result = isSubtype(getBuiltins()->numberType, negate(getBuiltins()->stringType));
+    CHECK(result.isSubtype);
+    CHECK(result.reasoning.empty());
 }
 
 TEST_CASE_FIXTURE(SubtypeFixture, "substitute_a_generic_for_a_negation")

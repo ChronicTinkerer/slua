@@ -12,7 +12,6 @@
 #include "ludata.h"
 #include "lbuffer.h"
 #include "llsl.h"
-#include "lnumutils.h"
 #include "lclass.h"
 #include "lvector.h"
 
@@ -1354,10 +1353,12 @@ static int64_t getheaptriggererroroffset(global_State* g)
     return int64_t(totalTerm * 1024);
 }
 
-// ServerLua: Suppress UBSan for intentional overflow in GC pacing arithmetic
-#if defined(__clang__) || defined(__GNUC__)
-__attribute__((no_sanitize("signed-integer-overflow")))
-#endif
+// the heap can shrink between measurements (after a full collection, or when thread stacks are shrunk during marking), which counts as no growth
+static size_t getheapgrowth(size_t current, size_t previous)
+{
+    return current > previous ? current - previous : 0;
+}
+
 static size_t getheaptrigger(global_State* g, size_t heapgoal)
 {
     // adjust threshold based on a guess of how many bytes will be allocated between the cycle start and sweep phase
@@ -1369,14 +1370,10 @@ static size_t getheaptrigger(global_State* g, size_t heapgoal)
     if (allocationduration < durationthreshold)
         return heapgoal;
 
-    double allocationrate = (g->gcstats.atomicstarttotalsizebytes - g->gcstats.endtotalsizebytes) / allocationduration;
+    double allocationrate = getheapgrowth(g->gcstats.atomicstarttotalsizebytes, g->gcstats.endtotalsizebytes) / allocationduration;
     double markduration = g->gcstats.atomicstarttimestamp - g->gcstats.starttimestamp;
 
-    // ServerLua: Overflow behavior is platform-dependent (x86 returns INT64_MIN, ARM saturates to INT64_MAX),
-    //  but the result is clamped below so the practical impact is minimal - just slightly different GC pacing.
-    // I don't trust that this won't come up again, so painting a big warning on it.
-    int64_t expectedgrowth;
-    luai_num2int64(expectedgrowth, markduration * allocationrate);
+    int64_t expectedgrowth = int64_t(markduration * allocationrate);
     int64_t offset = getheaptriggererroroffset(g);
     int64_t heaptrigger = heapgoal - (expectedgrowth + offset);
 
@@ -1519,6 +1516,10 @@ void luaC_fullgc(lua_State* L)
 
     g->gcstats.heapgoalsizebytes = heapgoalsizebytes;
 
+    // full collection ends a cycle, so the heap growth is measured from this point
+    g->gcstats.endtimestamp = lua_clock();
+    g->gcstats.endtotalsizebytes = g->totalbytes;
+
 #ifdef LUAI_GCMETRICS
     finishGcCycleMetrics(g);
 #endif
@@ -1603,7 +1604,7 @@ int64_t luaC_allocationrate(lua_State* L)
         if (duration < durationthreshold)
             return -1;
 
-        return int64_t((g->totalbytes - g->gcstats.endtotalsizebytes) / duration);
+        return int64_t(getheapgrowth(g->totalbytes, g->gcstats.endtotalsizebytes) / duration);
     }
 
     // totalbytes is unstable during the sweep, use the rate measured at the end of mark phase
@@ -1612,7 +1613,7 @@ int64_t luaC_allocationrate(lua_State* L)
     if (duration < durationthreshold)
         return -1;
 
-    return int64_t((g->gcstats.atomicstarttotalsizebytes - g->gcstats.endtotalsizebytes) / duration);
+    return int64_t(getheapgrowth(g->gcstats.atomicstarttotalsizebytes, g->gcstats.endtotalsizebytes) / duration);
 }
 
 const char* luaC_statename(int state)

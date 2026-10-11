@@ -678,6 +678,13 @@ GCObject* luaM_newgcocaged_(lua_State* L, size_t nsize, uint8_t memcat, int tt, 
 
     global_State* g = L->global;
 
+    // ServerLua: enforce memory allocation limits in user-owned memcats
+    if (LUAU_LIKELY(!!g->cb.beforeallocate) && memcat >= LUA_FIRST_USER_MEMCAT)
+    {
+        if (g->cb.beforeallocate(L, 0, nsize))
+            luaD_throw(L, LUA_ERRMEM);
+    }
+
     int nclass = sizeclass(nsize);
 
     void* block = NULL;
@@ -727,6 +734,13 @@ GCObject* luaM_newgcofixed_(lua_State* L, size_t nsize, uint8_t memcat, int tt)
     LUAU_ASSERT(nsize >= kGCOLinkOffset + sizeof(void*));
 
     global_State* g = L->global;
+
+    // ServerLua: enforce memory allocation limits in user-owned memcats
+    if (LUAU_LIKELY(!!g->cb.beforeallocate) && memcat >= LUA_FIRST_USER_MEMCAT)
+    {
+        if (g->cb.beforeallocate(L, 0, nsize))
+            luaD_throw(L, LUA_ERRMEM);
+    }
 
     int nclass = sizeclass(nsize);
     LUAU_ASSERT(nclass >= 0);
