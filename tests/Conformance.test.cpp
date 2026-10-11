@@ -2005,12 +2005,7 @@ TEST_CASE("Tables")
                 L,
                 [](lua_State* L)
                 {
-                    // ServerLua: hard stack tests reallocate the stack on every call, so a
-                    // one-byte cap fails the call to freeze itself rather than the allocation
-                    // the test is probing.
-#if !defined(HARDSTACKTESTS) || !HARDSTACKTESTS
                     reallocSizeLimit = luaL_checkunsigned(L, 1);
-#endif
                     return 0;
                 },
                 "setallocationlimit",
@@ -2018,6 +2013,14 @@ TEST_CASE("Tables")
                 nullptr
             );
             lua_setglobal(L, "setallocationlimit");
+
+            // ServerLua: lets tables.luau skip allocation probes that hard stack tests break
+#if defined(HARDSTACKTESTS) && HARDSTACKTESTS
+            lua_pushboolean(L, true);
+#else
+            lua_pushboolean(L, false);
+#endif
+            lua_setglobal(L, "hardstacktests");
         },
         nullptr,
         lua_newstate(limitedRealloc, nullptr)

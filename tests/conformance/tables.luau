@@ -1174,7 +1174,9 @@ do
   assert(t[513] == nil)
 end
 
-do
+-- ServerLua: hard stack tests reallocate the stack on every call, so a one-byte cap
+-- fails the call to table.freeze itself rather than the allocation being probed.
+if not hardstacktests then
   local t = table.create(1024, 1)
 
   t.__index = {}
