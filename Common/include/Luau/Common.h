@@ -231,8 +231,7 @@ struct FValueVersionSetter
 // no link dependency on the modules that define them.
 #define SLUA_REQUIRED_FFLAGS(X) \
     X("LuauIntegerType2") \
-    X("LuauIntegerLibrary") \
-    X("LuauXpcallFixMessageYieldPath")
+    X("LuauIntegerLibrary")
 
 namespace Luau
 {

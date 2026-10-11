@@ -23,9 +23,6 @@
 // ServerLua: used to detect __iter = pairs for native iteration fast-path
 LUAI_FUNC int luaB_pairs(lua_State* L);
 
-LUAU_FASTFLAGVARIABLE(LuauDirectFieldGet)
-LUAU_FLAGVERSION(LuauDirectFieldGet, 3)
-
 LUAU_FASTFLAGVARIABLE(LuauCIProto)
 LUAU_FASTFLAGVARIABLE(DebugLuauUserDefinedClassesRuntime)
 LUAU_FASTFLAGVARIABLE(LuauCallFeedback)
@@ -630,7 +627,7 @@ reentry:
                 else
                 {
                     // fast-path: registered direct field handler
-                    if (FFlag::LuauDirectFieldGet && ttisuserdata(rb))
+                    if (ttisuserdata(rb))
                     {
                         LuaTable* dispatch = L->global->udatadirectfields[uvalue(rb)->tag];
                         if (dispatch)
@@ -4143,14 +4140,16 @@ reentry:
 
             VM_CASE(LOP_FASTPCALL)
             {
+                // ServerLua: interrupt before pc advances, like every other site, so
+                // the preemption check sees this instruction and a break re-executes it.
+                if (FFlag::LuauFastpcallInterrupt)
+                    VM_INTERRUPT();
+
                 VM_CASE_INSTRUCTION insn = *pc++;
 
                 // even with compiler flag enabled, runtime can be safely disabled and will execute the fallback
                 if (!FFlag::LuauFastpcall)
                     VM_NEXT();
-
-                if (FFlag::LuauFastpcallInterrupt)
-                    VM_INTERRUPT();
 
                 int pfid = LUAU_INSN_A(insn);
                 int skip = LUAU_INSN_C(insn);
@@ -4222,14 +4221,12 @@ reentry:
                 VM_CASE_STKID ra = VM_REG(LUAU_INSN_A(insn));
                 uint8_t super = LUAU_INSN_B(insn);
 
-                // Load unreified class object from constant table using offset in aux
-                // ServerLua: Note that this lazy initialization will be problematic for us in ares.
+                // Load and clone class object from constant table using offset in aux
                 uint32_t aux = *pc++;
                 TValue* kv = VM_KV(aux);
 
-                setobj2s(L, ra, kv);
-
-                LuauClass* newcls = classvalue(ra);
+                LuauClass* newcls = luaR_cloneclass(L, classvalue(kv));
+                setclassvalue(L, ra, newcls);
                 newcls->isopen = (LUAU_INSN_C(insn) & 0x1u) != 0; // bottom bit of C is the isopen flag
 
                 if (super != 0xff)
@@ -4241,8 +4238,7 @@ reentry:
                     if (LUAU_UNLIKELY(!ttisclass(rb)))
                         luaG_typeerror(L, rb, "extend");
 
-                    LuauClass* inherited = luaR_inheritclass(L, newcls, classvalue(rb));
-                    setclassvalue(L, ra, inherited);
+                    luaR_inheritclass(L, newcls, classvalue(rb));
                 }
 
                 VM_NEXT();

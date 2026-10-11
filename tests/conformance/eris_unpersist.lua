@@ -64,8 +64,12 @@ function test(rootobj)
   dotest("Yielded pcall          ", pok, pval, "test")
   local xok, xval = coroutine.resume(rootobj.testxprotthr)
   dotest("Yielded xpcall         ", xok, xval, "handler:test")
+  local spok, spval = coroutine.resume(rootobj.testslowprotthr)
+  dotest("Yielded slow pcall     ", spok, spval, "test")
+  local sxok, sxval = coroutine.resume(rootobj.testslowxprotthr)
+  dotest("Yielded slow xpcall    ", sxok, sxval, "handler:test")
   -- "budget reset" means the resume path handed the handler a fresh C call
-  -- budget, which is what LuauXpcallFixMessageYieldPath fixes.
+  -- budget instead of the one it had when it yielded.
   if not limitedstack then
     local cok, cval = coroutine.resume(rootobj.testcsothr)
     dotest("Yielded xpcall C budget", cok, cval, "budget spent")

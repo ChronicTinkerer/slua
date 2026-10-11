@@ -503,6 +503,7 @@ inline bool luau_is_preemptible(unsigned int op)
     {
         case LOP_CALL:
         case LOP_CALLFB:
+        case LOP_FASTPCALL:
         case LOP_JUMPBACK:
         case LOP_RETURN:
         case LOP_FORNLOOP:
