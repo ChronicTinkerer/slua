@@ -7,6 +7,8 @@
 #include "Luau/Common.h"
 #include "Luau/BytecodeHeader.h"
 
+#include <exception>
+
 namespace Luau
 {
 class AstNameTable;

@@ -20,10 +20,10 @@
 #include <cstddef>
 
 LUAU_FASTFLAGVARIABLE(LuauGcTraceUdata)
-LUAU_FLAGVERSION(LuauGcTraceUdata, 3)
+LUAU_FLAGVERSION(LuauGcTraceUdata, 4)
 LUAU_FASTFLAG(LuauBackedgeHeapCheck)
 LUAU_FASTFLAG(LuauFastpcall)
-LUAU_FASTFLAG(DebugLuauCoroutineFinally)
+LUAU_FASTFLAG(LuauCoroutineFinally)
 LUAU_FASTFLAG(LuauFrozenMetaButterfly)
 
 /*
@@ -515,7 +515,7 @@ static void traversestack(global_State* g, lua_State* l)
     if (l->namecall)
         stringmark(l->namecall);
 
-    if (FFlag::DebugLuauCoroutineFinally && l->finalizers)
+    if (FFlag::LuauCoroutineFinally && l->finalizers)
         markobject(g, l->finalizers);
 
     for (StkId o = l->stack; o < l->top; o++)

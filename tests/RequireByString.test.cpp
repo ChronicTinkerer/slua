@@ -28,8 +28,6 @@ LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAG(DebugLuauUserDefinedClasses)
 LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
 LUAU_FASTFLAG(LuauCyclicRequireShortCircuit)
-LUAU_DYNAMIC_FASTFLAG(LuauSelfIsSelfAndAlwaysSelf)
-LUAU_FASTFLAG(LuauCallFeedback)
 LUAU_FASTFLAG(LuauEmitCallFeedback)
 LUAU_FASTFLAG(LuauBytecodeCostModel)
 
@@ -454,7 +452,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireUnprefixedPath")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireSubmoduleUsingSelfWithOverrideAttempt")
 {
-    ScopedFastFlag sffs[] = {{DFFlag::LuauSelfIsSelfAndAlwaysSelf, true}};
     {
         std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/config_tests/with_config/nested_override";
         runProtectedRequire(path);
@@ -1086,7 +1083,6 @@ TEST_CASE("RequireExportClass")
         {FFlag::LuauExportValueSyntax, true},
         {FFlag::DebugLuauUserDefinedClasses, true},
         {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuauCallFeedback, true},
         {FFlag::LuauEmitCallFeedback, true},
         {FFlag::LuauBytecodeCostModel, true}
     };
@@ -1106,7 +1102,6 @@ TEST_CASE("RequireExportClassChildWithoutParent")
         {FFlag::LuauExportValueSyntax, true},
         {FFlag::DebugLuauUserDefinedClasses, true},
         {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuauCallFeedback, true},
         {FFlag::LuauEmitCallFeedback, true},
         {FFlag::LuauBytecodeCostModel, true}
     };
@@ -1125,7 +1120,6 @@ TEST_CASE("RequireExportClassBothExported")
         {FFlag::LuauExportValueSyntax, true},
         {FFlag::DebugLuauUserDefinedClasses, true},
         {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuauCallFeedback, true},
         {FFlag::LuauEmitCallFeedback, true},
         {FFlag::LuauBytecodeCostModel, true}
     };
@@ -1144,7 +1138,6 @@ TEST_CASE("RequireExportClassMultiLevel")
         {FFlag::LuauExportValueSyntax, true},
         {FFlag::DebugLuauUserDefinedClasses, true},
         {FFlag::DebugLuauUserDefinedClassesRuntime, true},
-        {FFlag::LuauCallFeedback, true},
         {FFlag::LuauEmitCallFeedback, true},
         {FFlag::LuauBytecodeCostModel, true}
     };

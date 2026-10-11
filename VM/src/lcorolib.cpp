@@ -15,9 +15,9 @@
 
 #include <vector>
 
-LUAU_FASTFLAG(DebugLuauCoroutineFinally)
+LUAU_FASTFLAG(LuauCoroutineFinally)
 
-// TODO: Remove with FFlagDebugLuauCoroutineFinally
+// TODO: Remove with FFlagLuauCoroutineFinally
 #define CO_STATUS_ERROR -1
 #define CO_STATUS_BREAK -2
 
@@ -93,7 +93,7 @@ static LUAU_FORCEINLINE int auxresumefinishsuccess(lua_State* L, lua_State* co)
 template<bool Wrap>
 static LUAU_FORCEINLINE int auxresumefinish(lua_State* L, lua_State* co, int status)
 {
-    LUAU_ASSERT(FFlag::DebugLuauCoroutineFinally);
+    LUAU_ASSERT(FFlag::LuauCoroutineFinally);
 
     if (status == LUA_YIELD)
         return auxresumefinishsuccess<Wrap>(L, co);
@@ -117,8 +117,8 @@ static LUAU_FORCEINLINE int auxresumefinish(lua_State* L, lua_State* co, int sta
         if (Wrap)
             luaL_error(L, "cannot run finalizers from a wrapped coroutine");
 
-        luaD_preparefinalize(L, co);
-        return luaD_runfinalizers(L, /* toclose */ false, /* returnstatus */ true);
+        luaD_preparefinalize(L, co, co->status == LUA_OK ? FinallyResult::Finished : FinallyResult::Error);
+        return luaD_runfinalizers(L, /* returnstatus */ true);
     }
 
     if (status == LUA_OK)
@@ -139,7 +139,7 @@ static int auxresume(lua_State* L, lua_State* co, int narg)
         {
             lua_pushfstring(L, "cannot resume %s coroutine", statnames[status]);
 
-            if (FFlag::DebugLuauCoroutineFinally)
+            if (FFlag::LuauCoroutineFinally)
                 return auxresumefinisherror<Wrap>(L, co);
             else
                 return CO_STATUS_ERROR;
@@ -163,7 +163,7 @@ static int auxresume(lua_State* L, lua_State* co, int narg)
 
     int status = lua_resume(co, L, narg);
 
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
     {
         return auxresumefinish<Wrap>(L, co, status);
     }
@@ -202,7 +202,7 @@ static int auxresume(lua_State* L, lua_State* co, int narg)
 
 static int auxresumecont(lua_State* L, lua_State* co)
 {
-    LUAU_ASSERT(!FFlag::DebugLuauCoroutineFinally);
+    LUAU_ASSERT(!FFlag::LuauCoroutineFinally);
 
     if (co->status == 0 || co->status == LUA_YIELD)
     {
@@ -231,7 +231,7 @@ static int auxresumecont(lua_State* L, lua_State* co)
 
 static int coresumefinish(lua_State* L, int r)
 {
-    LUAU_ASSERT(!FFlag::DebugLuauCoroutineFinally);
+    LUAU_ASSERT(!FFlag::LuauCoroutineFinally);
 
     if (r < 0)
     {
@@ -253,7 +253,7 @@ static int coresumey(lua_State* L)
     luaL_argexpected(L, co, 1, "thread");
     int narg = cast_int(L->top - L->base) - 1;
 
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
     {
         return auxresume<false>(L, co, narg);
     }
@@ -270,7 +270,7 @@ static int coresumey(lua_State* L)
 
 static int coresumecont(lua_State* L, int status)
 {
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
     {
         // finalizer errored, return false status and the error
         if (status != LUA_OK)
@@ -293,7 +293,7 @@ static int coresumecont(lua_State* L, int status)
             return auxresumefinish<false>(L, co, co->status);
         }
 
-        return luaD_runfinalizers(L, /* toclose */ false, /* returnstatus */ true);
+        return luaD_runfinalizers(L, /* returnstatus */ true);
     }
     else
     {
@@ -321,7 +321,7 @@ static int coresumecont(lua_State* L, int status)
 
 static int auxwrapfinish(lua_State* L, int r)
 {
-    LUAU_ASSERT(!FFlag::DebugLuauCoroutineFinally);
+    LUAU_ASSERT(!FFlag::LuauCoroutineFinally);
 
     if (r < 0)
     {
@@ -341,7 +341,7 @@ static int auxwrapy(lua_State* L)
     lua_State* co = lua_tothread(L, lua_upvalueindex(1));
     int narg = cast_int(L->top - L->base);
 
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
     {
         return auxresume<true>(L, co, narg);
     }
@@ -360,7 +360,7 @@ static int auxwrapcont(lua_State* L, int status)
 {
     lua_State* co = lua_tothread(L, lua_upvalueindex(1));
 
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
     {
         // ServerLua: This continuation might be for a thread that was in break state, try resuming it
         if (co->status == LUA_BREAK)
@@ -426,7 +426,7 @@ static int coyieldable(lua_State* L)
 
 static int coclose(lua_State* L)
 {
-    LUAU_ASSERT(!FFlag::DebugLuauCoroutineFinally);
+    LUAU_ASSERT(!FFlag::LuauCoroutineFinally);
 
     lua_State* co = lua_tothread(L, 1);
     luaL_argexpected(L, co, 1, "thread");
@@ -486,7 +486,7 @@ static int auxsandboxedfinish(lua_State* L, lua_State* co, int r)
 // already propagated by auxresumefinish<true>, so only yield is left to reject.
 static int auxsandboxedfinishy(lua_State* L, lua_State* co, int n)
 {
-    LUAU_ASSERT(FFlag::DebugLuauCoroutineFinally);
+    LUAU_ASSERT(FFlag::LuauCoroutineFinally);
 
     if (co->status == LUA_BREAK)
         return n;
@@ -624,7 +624,7 @@ static int dangerouslyexecuterequiredmodule(lua_State* L)
 
     int r = auxresume<true>(L, co, 0);
 
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
         return auxsandboxedfinishy(L, co, r);
 
     return auxsandboxedfinish(L, co, r);
@@ -634,7 +634,7 @@ static int dangerouslyexecuterequiredmodulecont(lua_State* L, int status)
 {
     lua_State* co = lua_tothread(L, 2);
 
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
     {
         // This continuation might be for a thread that was in break state, try resuming it
         int n;
@@ -659,7 +659,7 @@ static int dangerouslyexecuterequiredmodulecont(lua_State* L, int status)
 
 static int coclosey(lua_State* L)
 {
-    LUAU_ASSERT(FFlag::DebugLuauCoroutineFinally);
+    LUAU_ASSERT(FFlag::LuauCoroutineFinally);
 
     lua_State* co = lua_tothread(L, 1);
     luaL_argexpected(L, co, 1, "thread");
@@ -672,9 +672,10 @@ static int coclosey(lua_State* L)
     {
         if (co->finalizers)
         {
-            luaD_preparefinalizestate(L, co, true);
+            lua_settop(L, 1);
+            luaD_preparefinalizestate(L, co, FinallyResult::Cancelled);
             lua_resetthread(co); // can be reused immediately
-            return luaD_runfinalizers(L, /* toclose */ true, /* returnstatus */ true);
+            return luaD_runfinalizers(L, /* returnstatus */ true);
         }
 
         lua_pushboolean(L, true);
@@ -701,7 +702,7 @@ static int coclosey(lua_State* L)
 
 static int coclosecont(lua_State* L, int status)
 {
-    LUAU_ASSERT(FFlag::DebugLuauCoroutineFinally);
+    LUAU_ASSERT(FFlag::LuauCoroutineFinally);
 
     if (status != LUA_OK)
     {
@@ -710,7 +711,7 @@ static int coclosecont(lua_State* L, int status)
         return 2;
     }
 
-    return luaD_runfinalizers(L, /* toclose */ true, /* returnstatus */ true);
+    return luaD_runfinalizers(L, /* returnstatus */ true);
 }
 
 // coroutine.finally(co, callback)
@@ -751,7 +752,7 @@ static const luaL_Reg co_funcs[] = {
 
 int luaopen_coroutine(lua_State* L)
 {
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
         luaL_register(L, LUA_COLIBNAME, co_funcs);
     else
         luaL_register(L, LUA_COLIBNAME, co_funcs_DEPRECATED);
@@ -759,7 +760,7 @@ int luaopen_coroutine(lua_State* L)
     lua_pushcclosurek(L, coresumey, "resume", 0, coresumecont);
     lua_setfield(L, -2, "resume");
 
-    if (FFlag::DebugLuauCoroutineFinally)
+    if (FFlag::LuauCoroutineFinally)
     {
         lua_pushcclosurek(L, coclosey, "close", 0, coclosecont);
         lua_setfield(L, -2, "close");

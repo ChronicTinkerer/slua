@@ -281,6 +281,7 @@ typedef struct global_State
 
     GCStats gcstats;
     uint32_t lastprotoid;
+    uint32_t lastclassid;
 
 #ifdef LUAI_GCMETRICS
     GCMetrics gcmetrics;
