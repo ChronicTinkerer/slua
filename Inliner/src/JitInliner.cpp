@@ -228,8 +228,11 @@ Proto* createInlinedProto(lua_State* L, Proto* caller, Proto* target, RuntimeBcF
     p->p = luaM_newarray(L, graph.protos.size(), Proto*, L->activememcat);
     p->sizep = int(graph.protos.size());
     LUAU_ASSERT(p->sizep == (caller->sizep + target->sizep));
-    memcpy(p->p, caller->p, caller->sizep * sizeof(Proto*));
-    memcpy(p->p + caller->sizep, target->p, target->sizep * sizeof(Proto*));
+    // ServerLua: guarded to satisfy UBSan, Proto::p is null when sizep is 0
+    if (caller->sizep)
+        memcpy(p->p, caller->p, caller->sizep * sizeof(Proto*));
+    if (target->sizep)
+        memcpy(p->p + caller->sizep, target->p, target->sizep * sizeof(Proto*));
 
     p->code = luaM_newarray(L, codeData.code.size(), Instruction, L->activememcat);
     p->sizecode = int(codeData.code.size());
@@ -246,8 +249,11 @@ Proto* createInlinedProto(lua_State* L, Proto* caller, Proto* target, RuntimeBcF
     uint32_t feedbackvecsize = caller->feedbackvecsize + target->feedbackvecsize;
     p->feedbackvec = luaM_newarray(L, feedbackvecsize, FeedbackVectorSlot, L->activememcat);
     p->feedbackvecsize = feedbackvecsize;
-    memcpy(p->feedbackvec, caller->feedbackvec, caller->feedbackvecsize * sizeof(FeedbackVectorSlot));
-    memcpy(p->feedbackvec + caller->feedbackvecsize, target->feedbackvec, target->feedbackvecsize * sizeof(FeedbackVectorSlot));
+    // ServerLua: guarded to satisfy UBSan, feedbackvec is null when feedbackvecsize is 0
+    if (caller->feedbackvecsize)
+        memcpy(p->feedbackvec, caller->feedbackvec, caller->feedbackvecsize * sizeof(FeedbackVectorSlot));
+    if (target->feedbackvecsize)
+        memcpy(p->feedbackvec + caller->feedbackvecsize, target->feedbackvec, target->feedbackvecsize * sizeof(FeedbackVectorSlot));
 
     LUAU_ASSERT(graph.feedbackSlots.size() == p->feedbackvecsize);
     for (uint32_t i = 0; i < p->feedbackvecsize; ++i)
