@@ -632,43 +632,6 @@ struct NodeUnrooter
     }
 };
 
-// ServerLua: NodeUnrooter for both parts, for the OOM-robust resize() which
-// allocates both before touching the table. Restores unless committed.
-struct ResizeUnrooter
-{
-    LuaTable *mT;
-    TValue *mOrigArray;
-    int mOrigSizeArray;
-    LuaNode *mOrigNode;
-    int mOrigLSizeNode;
-    bool mCommitted = false;
-
-    ResizeUnrooter(LuaTable *t)
-        : mT(t), mOrigArray(t->array), mOrigSizeArray(t->sizearray), mOrigNode(t->node), mOrigLSizeNode(t->lsizenode)
-    {
-        t->array = nullptr;
-        t->sizearray = 0;
-        t->node = cast_to(LuaNode*, dummynode);
-        t->lsizenode = 0;
-    }
-
-    void commit()
-    {
-        mCommitted = true;
-    }
-
-    ~ResizeUnrooter()
-    {
-        if (!mCommitted)
-        {
-            mT->array = mOrigArray;
-            mT->sizearray = mOrigSizeArray;
-            mT->node = mOrigNode;
-            mT->lsizenode = mOrigLSizeNode;
-        }
-    }
-};
-
 static void setnodevector(lua_State* L, LuaTable* t, int size)
 {
     int lsize;
@@ -725,6 +688,20 @@ static TValue* arrayornewkey_DEPRECATED(lua_State* L, LuaTable* t, const TValue*
     return newkey_DEPRECATED(L, t, key);
 }
 
+// ServerLua: charges resizing `t` to these part sizes as one realloc of both parts, while the
+//  old ones are still in place so a heap walk run by the charge sees everything they hold.
+static void chargeresize(lua_State* L, LuaTable* t, int nasize, int nhsize)
+{
+    bool replacesarray = nasize != t->sizearray;
+    size_t oldbytes = (replacesarray ? size_t(t->sizearray) * sizeof(TValue) : 0) +
+                      (t->node != dummynode ? size_t(sizenode(t)) * sizeof(LuaNode) : 0);
+    size_t newbytes = (replacesarray ? size_t(nasize) * sizeof(TValue) : 0) + size_t(nhsize) * sizeof(LuaNode);
+
+    global_State* g = L->global;
+    if (g->cb.beforeallocate && t->memcat >= LUA_FIRST_USER_MEMCAT && g->cb.beforeallocate(L, oldbytes, newbytes))
+        luaD_throw(L, LUA_ERRMEM);
+}
+
 static void resize(lua_State* L, LuaTable* t, int nasize, int nhsize)
 {
     LUAU_ASSERT(!hasmetacache(t));
@@ -758,9 +735,20 @@ static void resize(lua_State* L, LuaTable* t, int nasize, int nhsize)
 
         TValue* newarray = t->array;
 
-        // ServerLua: the old parts stay live until commit, but the user shouldn't
-        // be charged for both copies at once.
-        ResizeUnrooter unrooter(t);
+        // ServerLua: the allocations below are covered by this charge
+        chargeresize(L, t, nasize, nhsize);
+        global_State* g = L->global;
+        struct BeforeAllocateHider
+        {
+            global_State* g;
+            int (*hook)(lua_State* L, size_t osize, size_t nsize);
+
+            ~BeforeAllocateHider()
+            {
+                g->cb.beforeallocate = hook;
+            }
+        } hider{g, g->cb.beforeallocate};
+        g->cb.beforeallocate = nullptr;
 
         if (nasize != oldsizearray)
         {
@@ -821,8 +809,6 @@ static void resize(lua_State* L, LuaTable* t, int nasize, int nhsize)
         t->lsizenode = cast_byte(lsizenode);
         t->nodemask8 = cast_byte((1 << lsizenode) - 1);
         t->lastfree = nhsize; // all positions are free
-
-        unrooter.commit();
 
         // re-insert elements from vanishing array slice
         for (int i = nasize; i < oldsizearray; i++)
