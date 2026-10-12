@@ -39,6 +39,7 @@ LUAU_FASTINT(CodegenHeuristicsInstructionLimit)
 LUAU_DYNAMIC_FASTFLAG(LuauCodegenTrackingMultilocationFix)
 LUAU_FASTFLAG(LuauCodegenDetailedCompilationResult)
 LUAU_FASTFLAG(SLuaEagerWeakClear)
+LUAU_FASTFLAG(LuauCoroutineFinally)
 
 
 using StateRef = std::unique_ptr<lua_State, void (*)(lua_State*)>;
@@ -884,7 +885,15 @@ TEST_CASE("llcompat")
 
 TEST_CASE("dangerouslyexecuterequiredmodule")
 {
-    runConformance("dangerouslyexecuterequiredmodule.lua");
+    // The yield rejection has a separate finish path for each value of the flag
+    for (bool finally : {false, true})
+    {
+        SUBCASE(finally ? "LuauCoroutineFinally" : "no LuauCoroutineFinally")
+        {
+            ScopedFastFlag coroutine_finally{FFlag::LuauCoroutineFinally, finally};
+            runConformance("dangerouslyexecuterequiredmodule.lua");
+        }
+    }
 }
 
 TEST_CASE("dangerouslyexecuterequiredmodule with breaks")

@@ -47,6 +47,42 @@ end)
 assert(not yield_success, "Should error on yield")
 assert(string.match(yield_err, "attempt to yield from sandboxed require"), "Should have specific yield error message")
 
+-- A rejected yield leaves the module thread dead, so a handle it stashed can't resume it
+local stashed
+local old_require = require
+require = function(co) stashed = co end
+local stash_ok = pcall(function()
+    dangerouslyexecuterequiredmodule(function()
+        require(coroutine.running())
+        coroutine.yield()
+        return "resumed"
+    end)
+end)
+require = old_require
+assert(not stash_ok, "Should error on yield")
+assert(coroutine.status(stashed) == "dead", "Yielded module thread should be dead")
+local resumed, resume_err = coroutine.resume(stashed)
+assert(not resumed and resume_err == "cannot resume dead coroutine", "Yielded module thread should not resume")
+local closed, close_err = coroutine.close(stashed)
+assert(not closed and string.match(close_err, "attempt to yield from sandboxed require"), "Yielded module thread should be errored")
+
+-- The rejection is raised at the yield, where the module can catch it
+local recovered = dangerouslyexecuterequiredmodule(function()
+    local ok, err = pcall(coroutine.yield)
+    assert(not ok and err == "attempt to yield from sandboxed require")
+    return "recovered"
+end)
+assert(recovered == "recovered", "Module should be able to catch the yield rejection")
+
+-- Yielding again after catching it is rejected again
+local again_ok, again_err = pcall(function()
+    dangerouslyexecuterequiredmodule(function()
+        pcall(coroutine.yield)
+        coroutine.yield()
+    end)
+end)
+assert(not again_ok and string.match(again_err, "attempt to yield from sandboxed require"), "Should reject every yield")
+
 -- Type checking - non-function argument
 local type_success, type_err = pcall(function()
     dangerouslyexecuterequiredmodule("not a function")

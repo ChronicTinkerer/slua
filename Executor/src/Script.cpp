@@ -176,6 +176,7 @@ void Script::installVMCallbacks(lua_State* L)
     callbacks->interrupt = Script::interruptHandler;
     callbacks->userthread = Script::userThreadCallback;
     callbacks->beforeallocate = Script::memoryLimitCallback;
+    callbacks->beforethreaduse = Script::threadUseCallback;
 }
 
 // Given an arbitrary `lua_State*`, see if it can be traced back to a
@@ -607,6 +608,10 @@ void Script::abortHandler()
     LUAU_ASSERT(!mInExecution);
     if (!isHandlerActive())
         return;
+    // Whatever the handler left half-done, including coroutines it had
+    // resumed, can't be trusted, so the script doesn't carry on past it
+    logError(logSource(), "Host aborted an in-flight handler, faulting the script");
+    setFault(FaultKind::Unknown, "handler aborted by host");
     lua_resetthread(lua_tothread(mInstance.thread(), 1));
     mCurrentHandler = 0;
 }
@@ -940,6 +945,29 @@ void Script::userThreadCallback(lua_State* LP, lua_State* L)
     }
     // Copy thread data pointer to the child thread
     lua_setthreaddata(L, lua_getthreaddata(LP));
+}
+
+// static
+// Protect sensitive threads from misuse by user code
+int Script::threadUseCallback(lua_State* L, lua_State* co, int inspect)
+{
+    if (co->memcat < LUA_FIRST_USER_MEMCAT || lua_status(co) == LUA_BREAK)
+        return 1;
+
+    // Belongs to another script
+    if (lua_getthreaddata(co) != lua_getthreaddata(L))
+        return 1;
+
+    Script* script = fromLuaState(L);
+    if (script == nullptr)
+        return 0;
+    if (co == script->getInstanceState())
+        return 1;
+    // The handler thread can be looked at, just not acted on
+    if (!inspect && co == script->getHandlerState())
+        return 1;
+
+    return 0;
 }
 
 // static

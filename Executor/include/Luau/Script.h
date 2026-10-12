@@ -164,9 +164,10 @@ public:
     uint64_t nextState();
     // True when the handler thread holds a resumable in-progress handler
     bool isHandlerActive() const;
-    // Discards a resumable in-progress handler without completing it, so a
-    // host can recover from disagreement about whether a handler is in
-    // flight. A no-op when nothing is resumable.
+    // Discards a resumable in-progress handler without completing it, for a
+    // host that has lost track of whether a handler is in flight. The script
+    // is faulted, since nothing it left half-done can be trusted. A no-op when
+    // nothing is resumable.
     void abortHandler();
 
     bool isMainFunctionComplete() const { return mMainFunctionComplete; }
@@ -219,6 +220,7 @@ protected:
     static void interruptHandler(lua_State* L, int gc);
     static int memoryLimitCallback(lua_State* L, size_t osize, size_t nsize);
     static void userThreadCallback(lua_State* LP, lua_State* L);
+    static int threadUseCallback(lua_State* L, lua_State* co, int inspect);
 
     // Source string for log messages, so subclasses log with the same attribution
     const char* logSource() const { return mScriptId.c_str(); }

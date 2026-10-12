@@ -1321,6 +1321,8 @@ YieldableStatus luaSL_may_interrupt(lua_State *L)
     // Can't yield, inside more than one C call.
     if (L->nCcalls > L->baseCcalls)
         return YieldableStatus::BAD_NCALLS;
+    if (L->unbreakable)
+        return YieldableStatus::BAD_RESUMER;
     if (L->ci == nullptr)
         return YieldableStatus::BAD_CI;
     // only care if we're currently executing a lua function

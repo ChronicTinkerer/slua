@@ -39,24 +39,6 @@ static const char* const kGlobalsToRemove[] = {
     "setfenv",
 };
 
-// A replacement for `coroutine.running()` that won't return handles for the
-// handler thread or the instance root. Mostly to stop people manually
-// `resume()`ing or `close()`ing them.
-static int lcorolib_running(lua_State* L)
-{
-    Script* script = Script::fromLuaState(L);
-    if (script && (L == script->getHandlerState() || L == script->getInstanceState()))
-    {
-        // You're not allowed to touch these
-        lua_pushnil(L);
-        return 1;
-    }
-
-    if (lua_pushthread(L))
-        lua_pushnil(L);
-    return 1;
-}
-
 // A replacement for `gcinfo()` that reports the calling script's memory
 // rather than the whole VM's, which would leak co-resident scripts' usage.
 static int gcinfo(lua_State* L)
@@ -91,12 +73,6 @@ static void open_safe_libs(lua_State* L)
 
     lua_pushcfunction(L, gcinfo, "gcinfo");
     lua_setglobal(L, "gcinfo");
-
-    // Now replace `coroutine.running()` with our bodged version.
-    lua_getglobal(L, "coroutine");
-    lua_pushcfunction(L, lcorolib_running, "lcorolib_running");
-    lua_rawsetfield(L, -2, "running");
-    lua_pop(L, 1);
 }
 
 Environment::Environment(IProvisioner& provisioner, bool is_lsl, uint32_t api_version)

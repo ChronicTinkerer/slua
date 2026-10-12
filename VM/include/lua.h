@@ -918,6 +918,10 @@ struct lua_Callbacks
     // ServerLua: gets called before memory is allocated, return non-zero to fail the alloc. Only called for allocs in user memcats.
     int (*beforeallocate)(lua_State* L, size_t osize, size_t nsize);
 
+    // ServerLua: gets called before a script resumes, closes or adds a finalizer to 'co', or with 'inspect' set
+    // before it reads another thread's stack, return non-zero to refuse.
+    int (*beforethreaduse)(lua_State* L, lua_State* co, int inspect);
+
     void (*preresume)(lua_State* L);  // gets called before lua_resume runs a (co)routine
     void (*postresume)(lua_State* L); // gets called after lua_resume returns (yield, return, or error)
 

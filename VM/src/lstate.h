@@ -302,6 +302,9 @@ struct lua_State
 
     bool isactive;   // thread is currently executing, stack may be mutated without barriers
     bool singlestep; // call debugstep hook after each instruction
+    // ServerLua: A resumer up the chain can't break, so neither can this thread.
+    // Assigned on every resume, only read while running.
+    bool unbreakable;
 
     StkId top;                                        // first free slot in the stack
     StkId base;                                       // base of current function

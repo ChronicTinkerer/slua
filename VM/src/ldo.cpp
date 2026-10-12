@@ -734,6 +734,9 @@ static int resume_start(lua_State* L, lua_State* from, int nargs)
     if (L->nCcalls >= LUAI_MAXCCALLS)
         return resume_error(L, "C stack overflow", nargs);
 
+    // ServerLua: A break here can only propagate if every resumer up to the host can break too
+    L->unbreakable = from != nullptr && (from->nCcalls > from->baseCcalls || from->unbreakable);
+
     L->baseCcalls = ++L->nCcalls;
     L->isactive = true;
 

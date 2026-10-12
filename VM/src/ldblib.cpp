@@ -5,6 +5,7 @@
 #include "lvm.h"
 #include "lapi.h"
 #include "lstate.h"
+#include "ldebug.h" // ServerLua
 
 #include <string.h>
 #include <stdio.h>
@@ -15,7 +16,11 @@ static lua_State* getthread(lua_State* L, int* arg)
     if (lua_isthread(L, 1))
     {
         *arg = 1;
-        return lua_tothread(L, 1);
+        lua_State* L1 = lua_tothread(L, 1);
+        // ServerLua: Inspecting another thread can touch its stack, so the host gets a say
+        if (L1 != L && L->global->cb.beforethreaduse && L->global->cb.beforethreaduse(L, L1, true) != 0)
+            luaL_error(L, LUA_THREADREFUSEDMSG);
+        return L1;
     }
     else
     {

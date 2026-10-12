@@ -23,6 +23,8 @@ enum class YieldableStatus : uint8_t {
     NOT_LUA = 3,
     INVALID_PC = 4,
     UNSUPPORTED_INSTR = 5,
+    // A resumer up the chain can't break
+    BAD_RESUMER = 6,
 };
 
 #define UTAG_QUATERNION 25

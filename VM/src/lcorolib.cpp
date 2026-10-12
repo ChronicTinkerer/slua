@@ -40,6 +40,12 @@ static int interruptThread(lua_State* L, lua_State* co)
     return lua_break(L);
 }
 
+// ServerLua: Threads the host won't let scripts act on
+static bool isrefusedthread(lua_State* L, lua_State* co)
+{
+    return L->global->cb.beforethreaduse && L->global->cb.beforethreaduse(L, co, false) != 0;
+}
+
 template<bool Wrap>
 static int auxresumefinisherror(lua_State* L, lua_State* co)
 {
@@ -251,6 +257,15 @@ static int coresumey(lua_State* L)
 {
     lua_State* co = lua_tothread(L, 1);
     luaL_argexpected(L, co, 1, "thread");
+
+    // ServerLua: Reported like any other coroutine that can't be resumed
+    if (isrefusedthread(L, co))
+    {
+        lua_pushboolean(L, 0);
+        lua_pushliteral(L, LUA_THREADREFUSEDMSG);
+        return 2;
+    }
+
     int narg = cast_int(L->top - L->base) - 1;
 
     if (FFlag::LuauCoroutineFinally)
@@ -339,6 +354,11 @@ static int auxwrapfinish(lua_State* L, int r)
 static int auxwrapy(lua_State* L)
 {
     lua_State* co = lua_tothread(L, lua_upvalueindex(1));
+
+    // ServerLua: Only ever refuses a wrapped thread that was orphaned in LUA_BREAK
+    if (isrefusedthread(L, co))
+        luaL_error(L, LUA_THREADREFUSEDMSG);
+
     int narg = cast_int(L->top - L->base);
 
     if (FFlag::LuauCoroutineFinally)
@@ -431,6 +451,10 @@ static int coclose(lua_State* L)
     lua_State* co = lua_tothread(L, 1);
     luaL_argexpected(L, co, 1, "thread");
 
+    // ServerLua: Refuse threads scripts may not act on
+    if (isrefusedthread(L, co))
+        luaL_error(L, LUA_THREADREFUSEDMSG);
+
     int status = lua_costatus(L, co);
     if (status != LUA_COFIN && status != LUA_COERR && status != LUA_COSUS)
         luaL_error(L, "cannot close %s coroutine", statnames[status]);
@@ -457,11 +481,24 @@ static int coclose(lua_State* L)
     }
 }
 
+// ServerLua: Sends a rejected yield back into the module as an error at the
+// yield site, where the module can catch it. Returns the resulting resume status.
+static int auxsandboxedrejectyield(lua_State* L, lua_State* co, int nyielded)
+{
+    lua_pop(L, nyielded);
+    lua_pushliteral(L, "attempt to yield from sandboxed require");
+    lua_xmove(L, co, 1);
+    return lua_resumeerror(co, L);
+}
+
 // ServerLua: For mimicking sandboxing semantics of `require()`
 static int auxsandboxedfinish(lua_State* L, lua_State* co, int r)
 {
-    if (r >= 0 && co->status == LUA_YIELD)
-        luaL_error(L, "attempt to yield from sandboxed require");
+    while (r >= 0 && co->status == LUA_YIELD)
+    {
+        int status = auxsandboxedrejectyield(L, co, r);
+        r = status == LUA_BREAK ? CO_STATUS_BREAK : auxresumecont(L, co);
+    }
 
     if (r == CO_STATUS_BREAK)
         return interruptThread(L, co);
@@ -482,17 +519,17 @@ static int auxsandboxedfinish(lua_State* L, lua_State* co, int r)
     return r;
 }
 
-// Wrap-flavoured counterpart: errors have already been thrown and breaks
+// ServerLua: Wrap-flavoured counterpart: errors have already been thrown and breaks
 // already propagated by auxresumefinish<true>, so only yield is left to reject.
 static int auxsandboxedfinishy(lua_State* L, lua_State* co, int n)
 {
     LUAU_ASSERT(FFlag::LuauCoroutineFinally);
 
+    while (co->status == LUA_YIELD)
+        n = auxresumefinish<true>(L, co, auxsandboxedrejectyield(L, co, n));
+
     if (co->status == LUA_BREAK)
         return n;
-
-    if (co->status == LUA_YIELD)
-        luaL_error(L, "attempt to yield from sandboxed require");
 
     lua_remove(L, 2);
     lua_remove(L, 1);
@@ -664,6 +701,10 @@ static int coclosey(lua_State* L)
     lua_State* co = lua_tothread(L, 1);
     luaL_argexpected(L, co, 1, "thread");
 
+    // ServerLua: Refuse threads scripts may not act on
+    if (isrefusedthread(L, co))
+        luaL_error(L, LUA_THREADREFUSEDMSG);
+
     int status = lua_costatus(L, co);
     if (status != LUA_COFIN && status != LUA_COERR && status != LUA_COSUS)
         luaL_error(L, "cannot close %s coroutine", statnames[status]);
@@ -719,6 +760,10 @@ static int cofinally(lua_State* L)
 {
     lua_State* co = lua_tothread(L, 1);
     luaL_argexpected(L, co, 1, "thread");
+
+    // ServerLua: Refuse threads scripts may not act on
+    if (isrefusedthread(L, co))
+        luaL_error(L, LUA_THREADREFUSEDMSG);
 
     // callback can be any callable object
     if (lua_isnoneornil(L, 2))

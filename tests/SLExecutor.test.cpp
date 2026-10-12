@@ -33,6 +33,7 @@ using namespace Luau;
 using namespace Luau::Executor;
 
 LUAU_FASTFLAG(SLuaEagerWeakClear)
+LUAU_FASTFLAG(LuauCoroutineFinally)
 
 // Wraps bytes the caller supplies, which no compiler need have produced, and
 // can declare a charged size the payload doesn't match. Tests that just want a
@@ -503,19 +504,28 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor refuses to dispatch over a resumable 
     CHECK(exec.resumeEventHandler().status == HandlerRunStatus::Refused);
 }
 
-TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor abortHandler discards a resumable handler")
+// The host lost track of a handler in flight. Whatever it left half-done,
+// including the coroutines it had resumed, can't be trusted, so the script
+// faults rather than carrying on past it.
+TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor abortHandler faults the script")
 {
     TestScript ts(R"(
         ran = 0
         function LLEvents.moving_start()
             ran += 1
-            for i = 1, 100000 do end
-            ran += 100
+            worker = coroutine.create(function()
+                for i = 1, 100000 do end
+                ran += 100
+            end)
+            coroutine.resume(worker)
+        end
+        function LLEvents.moving_end()
+            coroutine.resume(worker)
         end
     )");
     ts.start();
 
-    // Preempt the handler mid-loop, then abort it instead of resuming
+    // Preempt inside the worker, then abort instead of resuming
     ts.host.clock_step = 0.001;
     dispatch(ts.exec, LSLEvent::MovingStart, HandlerRunStatus::Preempted, nullptr, nullptr, 0.005);
     REQUIRE(ts.exec.isHandlerActive());
@@ -523,16 +533,16 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor abortHandler discards a resumable han
     ts.host.clock_step = 0.0;
     ts.exec.abortHandler();
     CHECK_FALSE(ts.exec.isHandlerActive());
+    CHECK(ts.exec.getFaultKind() == FaultKind::Unknown);
+    CHECK(ts.exec.getFaultString() == "handler aborted by host");
 
     // Aborting again is a no-op
     ts.exec.abortHandler();
 
-    // The aborted handler's tail never ran, and the thread is clean enough
-    // to dispatch on again
-    RunResult rerun = dispatch(ts.exec, LSLEvent::MovingStart);
-    // Main-function completion was already reported, never again
-    CHECK_FALSE(rerun.mainFunctionCompleted);
-    CHECK(readIntGlobal(ts.exec, "ran") == 102);
+    // Nothing runs after it, so the worker left in LUA_BREAK can't be picked
+    // back up
+    dispatch(ts.exec, LSLEvent::MovingEnd, HandlerRunStatus::Fault);
+    CHECK(readIntGlobal(ts.exec, "ran") == 1);
 }
 
 TEST_CASE("LSLEvents registry")
@@ -2690,19 +2700,122 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor coroutines survive preemption")
     checkCapture(ts.host.printed, {"1275"});
 }
 
-TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor hides engine threads from coroutine.running")
+// A coroutine resumed from inside a metamethod sits under a resumer that can't
+// break, so the quantum running out in it must not preempt it. Otherwise the
+// break surfaces as an error from wherever the coroutine was resumed.
+TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor preemption never breaks a coroutine under a metamethod")
 {
-    TestScript script(R"(
-        in_main = coroutine.running() == nil and 1 or 0
-        in_coro = coroutine.wrap(function()
-            return coroutine.running() ~= nil and 1 or 0
-        end)()
-    )");
-    script.start();
-    // The staged main runs on the handler thread, which the bodged
-    // coroutine.running() hides; a user coroutine still sees itself
-    CHECK(readIntGlobal(script.exec, "in_main") == 1);
-    CHECK(readIntGlobal(script.exec, "in_coro") == 1);
+    // jump_clock() puts the coroutine past the quantum, but well short of
+    // the escalation for code that can't yield
+    const char* source = nullptr;
+    SUBCASE("coroutine.resume")
+    {
+        source = R"(
+            local co = coroutine.create(function()
+                jump_clock(0.01)
+                for i = 1, 100 do end
+                return "done"
+            end)
+            local t = setmetatable({}, {__index = function()
+                local _, v = coroutine.resume(co)
+                return v
+            end})
+            local ok, v = pcall(function() return t.x end)
+            print(`{ok}:{v}`)
+        )";
+    }
+    SUBCASE("coroutine.wrap")
+    {
+        source = R"(
+            local co = coroutine.wrap(function()
+                jump_clock(0.01)
+                for i = 1, 100 do end
+                return "done"
+            end)
+            local t = setmetatable({}, {__index = function()
+                return co()
+            end})
+            local ok, v = pcall(function() return t.x end)
+            print(`{ok}:{v}`)
+        )";
+    }
+    TestScript ts(source);
+    ts.loadDefaultState();
+
+    resumeToCompletion(ts.exec, 0.005);
+    checkCapture(ts.host.printed, {"true:done"});
+}
+
+// The handler thread is what coroutine.running() returns at the top level, but
+// scripts can't resume, close or attach finalizers to it
+TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor guards engine threads from coroutine APIs")
+{
+    SUBCASE("running")
+    {
+        TestScript ts(R"(
+            local main = coroutine.running()
+            print(`{typeof(main)}:{coroutine.status(main)}`)
+            print(coroutine.wrap(function()
+                return coroutine.status(main)
+            end)())
+        )");
+        ts.start();
+        checkCapture(ts.host.printed, {"thread:running", "normal"});
+    }
+    SUBCASE("resume and close")
+    {
+        TestScript ts(R"(
+            local main = coroutine.running()
+            local ok, err = coroutine.resume(main)
+            print(`{ok}:{err}`)
+            -- Refused before the stock "normal" status check gets a say
+            print(coroutine.wrap(function()
+                local nested_ok, nested_err = coroutine.resume(main)
+                return `{nested_ok}:{nested_err}`
+            end)())
+            local closed, close_err = pcall(coroutine.close, main)
+            print(`{closed}:{string.match(close_err, "coroutine is not accessible")}`)
+        )");
+        ts.start();
+        checkCapture(ts.host.printed, {
+            "false:coroutine is not accessible",
+            "false:coroutine is not accessible",
+            "false:coroutine is not accessible",
+        });
+    }
+    SUBCASE("inspect")
+    {
+        TestScript ts(R"(
+            local main = coroutine.running()
+            print(coroutine.wrap(function()
+                return `{typeof(debug.traceback(main))}:{typeof(debug.info(main, 1, "l"))}`
+            end)())
+        )");
+        ts.start();
+        checkCapture(ts.host.printed, {"string:number"});
+    }
+    SUBCASE("identity across events")
+    {
+        TestScript ts(R"(
+            local main = coroutine.running()
+            LLEvents:on("moving_start", function()
+                print(`{coroutine.running() == main}`)
+            end)
+        )");
+        ts.start();
+        dispatch(ts.exec, LSLEvent::MovingStart);
+        checkCapture(ts.host.printed, {"true"});
+    }
+    SUBCASE("finally")
+    {
+        ScopedFastFlag coroutine_finally{FFlag::LuauCoroutineFinally, true};
+        TestScript ts(R"(
+            local ok, err = pcall(coroutine.finally, coroutine.running(), function() end)
+            print(`{ok}:{string.match(err, "coroutine is not accessible")}`)
+        )");
+        ts.start();
+        checkCapture(ts.host.printed, {"false:coroutine is not accessible"});
+    }
 }
 
 TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor faulting LSL constructor")

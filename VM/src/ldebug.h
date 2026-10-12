@@ -12,6 +12,8 @@
 
 #define LUA_MEMERRMSG "not enough memory"
 #define LUA_ERRERRMSG "error in error handling"
+// ServerLua: raised when the host won't let a script use a thread
+#define LUA_THREADREFUSEDMSG "coroutine is not accessible"
 
 LUAI_FUNC l_noret luaG_typeerrorL(lua_State* L, const TValue* o, const char* opname);
 LUAI_FUNC l_noret luaG_forerrorL(lua_State* L, const TValue* o, const char* what);
