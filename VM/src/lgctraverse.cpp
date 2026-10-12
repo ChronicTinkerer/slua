@@ -89,6 +89,10 @@ static bool hasweakvaluesemantics(GCObject* o)
 
 static void traversetable(ReachableContext* ctx, LuaTable* h)
 {
+    // luaH_setreadonly() only builds metamethod caches for system tables, so
+    // neither the sizing nor the weak clear below account for one.
+    LUAU_ASSERT(!hasmetacache(h));
+
     // Traverse metatable
     if (h->metatable)
         enqueueobj(ctx, obj2gco(h->metatable));
