@@ -182,6 +182,7 @@ typedef uint64_t ares_size_t;
 #define ERIS_ERR_TABLE_COUNT "table had a different key count after "\
                                 "deserialize, expected %d, got %d"
 #define ERIS_ERR_THREAD "cannot persist currently running thread"
+#define ERIS_ERR_FINALIZERS "cannot persist coroutine finalizers"
 #define ERIS_ERR_THREADCI "invalid callinfo"
 #define ERIS_ERR_UPVAL_IDX "invalid upvalue index %d"
 #define ERIS_ERR_THREADCTX "bad C continuation function"
@@ -2841,6 +2842,12 @@ p_thread(Info *info) {                                          /* ... thread */
    * running thread. And we use the stack. So yeah, really not a good idea. */
   if (thread == info->L) {
     eris_error(info, ERIS_ERR_THREAD);
+    return; /* not reached */
+  }
+
+  // The format doesn't carry coroutine.finally() callbacks yet, refuse rather than drop them.
+  if (thread->finalizers != nullptr) {
+    eris_error(info, ERIS_ERR_FINALIZERS);
     return; /* not reached */
   }
 

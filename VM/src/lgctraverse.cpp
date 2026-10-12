@@ -208,6 +208,10 @@ static void traversethread(ReachableContext* ctx, lua_State* th)
     // Traverse open upvalues
     for (UpVal* uv = th->openupval; uv; uv = uv->u.open.threadnext)
         enqueueobj(ctx, obj2gco(uv));
+
+    // Traverse pending coroutine.finally() callbacks
+    if (th->finalizers)
+        enqueueobj(ctx, obj2gco(th->finalizers));
 }
 
 static void traverseproto(ReachableContext* ctx, Proto* p)

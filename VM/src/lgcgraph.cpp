@@ -458,6 +458,9 @@ static void graph_traverse_thread(GraphContext *ctx, GCObject *from, lua_State *
 
     for (UpVal *uv = th->openupval; uv; uv = uv->u.open.threadnext)
         graph_enqueue(ctx, from, obj2gco(uv), "openupval");
+
+    if (th->finalizers)
+        graph_enqueue(ctx, from, obj2gco(th->finalizers), "finalizers");
 }
 
 static void graph_traverse_proto(GraphContext *ctx, GCObject *from, Proto *p)
