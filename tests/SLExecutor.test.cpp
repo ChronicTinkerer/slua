@@ -849,6 +849,67 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor weak references die before OoM")
     checkCapture(host.printed, {"cleared", "6000"});
 }
 
+// Fills memory right up to the limit, then grows a table whose contents nothing
+// else references. The resize can't fit, and nothing it holds may be treated as
+// unreachable while it's attempted.
+TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor a table resize near the limit still sees the table's contents")
+{
+    bool eager = false;
+    SUBCASE("eager weak clear off") {}
+    SUBCASE("eager weak clear on")
+    {
+        eager = true;
+    }
+    ScopedFastFlag eager_weak_clear{FFlag::SLuaEagerWeakClear, eager};
+
+    TestScript ts(R"(
+        -- 512 non-integer keys fill held's node part exactly, so one more key
+        -- resizes it from 512 to 1024 nodes
+        held = {}
+        for i = 0, 511 do
+            held[i + 0.5] = true
+        end
+        -- Only reachable through held's node part
+        held[0.5] = table.create(1500, 0)
+        held[1.5] = table.create(1500, 0)
+        cache = setmetatable({}, { __mode = "v" })
+        cache.x = held[0.5]
+
+        -- Set up front so nothing below allocates besides the buffers and the resize
+        grew = 0
+        kept = 0
+        fill = table.create(1024)
+        local sizes = {4096, 256, 16}
+        local n = 0
+        local function fill_up()
+            for _, size in sizes do
+                while n < 1024 do
+                    local ok, b = pcall(buffer.create, size)
+                    if not ok then
+                        break
+                    end
+                    n += 1
+                    fill[n] = b
+                end
+            end
+        end
+        local function grow()
+            held[512.5] = true
+        end
+
+        fill_up()
+        grew = if pcall(grow) then 1 else 0
+        fill_up()
+        kept = if cache.x ~= nil then 1 else 0
+    )");
+    ts.start();
+    Script& exec = ts.exec;
+
+    CHECK(readIntGlobal(exec, "grew") == 0);
+    CHECK(readIntGlobal(exec, "kept") == 1);
+    CHECK(exec.getUsedMemory() <= exec.getMemoryLimit());
+}
+
 TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor SLua lifecycle")
 {
     TestScript ts(R"(

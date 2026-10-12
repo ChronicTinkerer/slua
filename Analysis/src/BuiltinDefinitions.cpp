@@ -24,7 +24,9 @@
 #include <algorithm>
 #include <string_view>
 
-LUAU_FASTFLAG(DebugLuauCyclicRequireTypeInference)
+LUAU_FASTFLAG(LuauCyclicRequireTypeInference)
+LUAU_FASTFLAG(LuauDoesCallErrorUnwrapsGroups)
+LUAU_FASTFLAG(DebugLuauExactTableTypes)
 
 /** FIXME: Many of these type definitions are not quite completely accurate.
  *
@@ -563,6 +565,8 @@ void registerBuiltinGlobals(Frontend& frontend, GlobalTypes& globals, bool typeC
         "tostring",
         "type",
         "typeof",
+        "pcall",
+        "xpcall",
     };
 
     for (auto& name : typeFunctionRuntimeBindings)
@@ -717,10 +721,14 @@ bool MagicFormat::infer(const MagicFunctionCallContext& context)
 
     if (numExpectedParams != numActualParams && (!tail || numExpectedParams < numActualParams))
     {
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
-            context.solver->reportError(CountMismatch{numExpectedParams, std::nullopt, numActualParams}, context.callSite->location, *context.constraint->moduleName);
+        if (FFlag::LuauCyclicRequireTypeInference)
+            context.solver->reportError(
+                CountMismatch{numExpectedParams, std::nullopt, numActualParams}, context.callSite->location, *context.constraint->moduleName
+            );
         else
-            context.solver->DEPRECATED_reportError(TypeError{context.callSite->location, CountMismatch{numExpectedParams, std::nullopt, numActualParams}});
+            context.solver->DEPRECATED_reportError(
+                TypeError{context.callSite->location, CountMismatch{numExpectedParams, std::nullopt, numActualParams}}
+            );
     }
 
     // This is invoked at solve time, so we just need to provide a type for the result of :/.format
@@ -1257,7 +1265,9 @@ TypeId makeStringMetatable(NotNull<BuiltinTypes> builtinTypes, SolverMode mode)
              {},
              {optionalString},
              {},
-             {arena->addType(TableType{{}, TableIndexer{numberType, stringType}, TypeLevel{}, TableState::Sealed})},
+             {arena->addType(TableType{{}, TableIndexer{numberType, stringType}, TypeLevel{},
+                FFlag::DebugLuauExactTableTypes ? TableState::Exact : TableState::Sealed
+             })},
              /* checked */ true
          )}},
         {"pack",
@@ -1334,8 +1344,10 @@ bool MagicSelect::infer(const MagicFunctionCallContext& context)
 {
     if (context.callSite->args.size <= 0)
     {
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
-            context.solver->reportError(GenericError{"select should take 1 or more arguments"}, context.callSite->location, *context.constraint->moduleName);
+        if (FFlag::LuauCyclicRequireTypeInference)
+            context.solver->reportError(
+                GenericError{"select should take 1 or more arguments"}, context.callSite->location, *context.constraint->moduleName
+            );
         else
             context.solver->DEPRECATED_reportError(TypeError{context.callSite->location, GenericError{"select should take 1 or more arguments"}});
         return false;
@@ -1635,7 +1647,7 @@ bool MagicClone::infer(const MagicFunctionCallContext& context)
     const auto& [paramTypes, paramTail] = flatten(context.arguments);
     if (paramTypes.empty() || context.callSite->args.size == 0)
     {
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
             context.solver->reportError(CountMismatch{1, std::nullopt, 0}, context.callSite->argLocation, *context.constraint->moduleName);
         else
             context.solver->DEPRECATED_reportError(CountMismatch{1, std::nullopt, 0}, context.callSite->argLocation);
@@ -1687,7 +1699,11 @@ static std::optional<TypeId> freezeTable(TypeId inputType, const MagicFunctionCa
         auto tableTy = getMutable<TableType>(resultType);
         // `clone` should not break this.
         LUAU_ASSERT(tableTy);
-        tableTy->state = TableState::Sealed;
+
+        if (FFlag::DebugLuauExactTableTypes && (tableTy->state == TableState::Unsealed || tableTy->state == TableState::Exact))
+            tableTy->state = TableState::Exact;
+        else
+            tableTy->state = TableState::Sealed;
 
         // We'll mutate the table to make every property type read-only.
         for (auto iter = tableTy->props.begin(); iter != tableTy->props.end();)
@@ -1879,7 +1895,7 @@ static bool checkRequirePathNewSolver(NotNull<ConstraintSolver> solver, AstExpr*
     return good;
 }
 
-// Clip with DebugLuauCyclicRequireTypeInference
+// Clip with LuauCyclicRequireTypeInference
 static bool DEPRECATED_checkRequirePathDcr(NotNull<ConstraintSolver> solver, AstExpr* expr)
 {
     // require(foo.parent.bar) will technically work, but it depends on legacy goop that
@@ -1906,14 +1922,14 @@ bool MagicRequire::infer(const MagicFunctionCallContext& context)
 {
     if (context.callSite->args.size != 1)
     {
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
             context.solver->reportError(GenericError{"require takes 1 argument"}, context.callSite->location, *context.constraint->moduleName);
         else
             context.solver->DEPRECATED_reportError(GenericError{"require takes 1 argument"}, context.callSite->location);
         return false;
     }
 
-    if (FFlag::DebugLuauCyclicRequireTypeInference)
+    if (FFlag::LuauCyclicRequireTypeInference)
     {
         if (!checkRequirePathNewSolver(context.solver, context.callSite->args.data[0], *context.constraint->moduleName))
             return false;
@@ -1924,15 +1940,13 @@ bool MagicRequire::infer(const MagicFunctionCallContext& context)
             return false;
     }
 
-    const ModuleName& resolveFrom = FFlag::DebugLuauCyclicRequireTypeInference
-        ? *context.constraint->moduleName
-        : context.solver->module->name;
+    const ModuleName& resolveFrom = FFlag::LuauCyclicRequireTypeInference ? *context.constraint->moduleName : context.solver->module->name;
 
     if (auto moduleInfo = context.solver->moduleResolver->resolveModuleInfo(resolveFrom, *context.callSite))
     {
-        TypeId moduleType = FFlag::DebugLuauCyclicRequireTypeInference
-            ? context.solver->resolveModule(*moduleInfo, context.callSite->location, *context.constraint->moduleName)
-            : context.solver->DEPRECATED_resolveModule(*moduleInfo, context.callSite->location);
+        TypeId moduleType = FFlag::LuauCyclicRequireTypeInference
+                                ? context.solver->resolveModule(*moduleInfo, context.callSite->location, *context.constraint->moduleName)
+                                : context.solver->DEPRECATED_resolveModule(*moduleInfo, context.callSite->location);
         TypePackId moduleResult = context.solver->arena->addTypePack({moduleType});
         asMutable(context.result)->ty.emplace<BoundTypePack>(moduleResult);
 
@@ -1977,7 +1991,8 @@ bool matchAssert(const AstExprCall& call)
     if (call.args.size < 1)
         return false;
 
-    const AstExprGlobal* funcAsGlobal = call.func->as<AstExprGlobal>();
+    const AstExpr* func = FFlag::LuauDoesCallErrorUnwrapsGroups ? unwrapGroup(call.func) : call.func;
+    const AstExprGlobal* funcAsGlobal = func->as<AstExprGlobal>();
     if (!funcAsGlobal || funcAsGlobal->name != "assert")
         return false;
 

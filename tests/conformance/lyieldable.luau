@@ -234,27 +234,32 @@ end
 -- call_test_sum_k runs the continuation over hand-built bytes with the
 -- callback's pending result on the stack.
 do
-    local function state(version, region_len, phase, innermost)
-        return string.pack("<BI2Bi4i4i4B", version, region_len, phase, 4, 5, 6, innermost)
+    local function state(version, region_len, top, phase, innermost)
+        return string.pack("<BI2I2Bi4i4i4B", version, region_len, top, phase, 4, 5, 6, innermost)
     end
     local function add(i) return i end
     -- i=4 of n=5 with 6 banked and callback(4)'s result of 4 pending
-    assert(call_test_sum_k(state(0, 14, 1, 1), add, 5, 4) == 15)
+    assert(call_test_sum_k(state(0, 16, 0, 1, 1), add, 5, 4) == 15)
+    -- A recorded top drops what resume pushed above the frame
+    assert(call_test_sum_k(state(0, 16, 4, 1, 1), add, 5, 4, "junk", "junk") == 15)
 
     local function assert_resume_fails(bytes, pattern)
         local ok, err = pcall(call_test_sum_k, bytes, add, 5, 4)
         assert(not ok and string.find(err, pattern, 1, true) ~= nil, err)
     end
-    assert_resume_fails(state(1, 14, 1, 1), "newer version")
-    assert_resume_fails(state(0, 200, 1, 1), "corrupt yield state")
-    assert_resume_fails(state(0, 14, 9, 1), "corrupt yield state")
-    assert_resume_fails(state(0, 14, 1, 2), "corrupt yield state")
+    assert_resume_fails(state(1, 16, 0, 1, 1), "newer version")
+    assert_resume_fails(state(0, 200, 0, 1, 1), "corrupt yield state")
+    assert_resume_fails(state(0, 16, 0, 9, 1), "corrupt yield state")
+    assert_resume_fails(state(0, 16, 0, 1, 2), "corrupt yield state")
+    -- A top above the live stack, and a root region too short to hold one
+    assert_resume_fails(state(0, 16, 99, 1, 1), "corrupt yield state")
+    assert_resume_fails(string.pack("<BI2B", 0, 1, 1), "corrupt yield state")
 
     -- A region that stops short of the accumulator slot leaves it at its
     -- default, so only the pending 4 and callback(5) count
-    assert(call_test_sum_k(string.pack("<BI2Bi4i4B", 0, 10, 1, 4, 5, 1), add, 5, 4) == 9)
+    assert(call_test_sum_k(string.pack("<BI2I2Bi4i4B", 0, 12, 0, 1, 4, 5, 1), add, 5, 4) == 9)
     -- A region with a trailing slot this build doesn't know is read as its prefix
-    assert(call_test_sum_k(string.pack("<BI2Bi4i4i4i4B", 0, 18, 1, 4, 5, 6, 99, 1), add, 5, 4) == 15)
+    assert(call_test_sum_k(string.pack("<BI2I2Bi4i4i4i4B", 0, 20, 0, 1, 4, 5, 6, 99, 1), add, 5, 4) == 15)
 end
 
 -- Recursive: ares round-trip mid-recursion

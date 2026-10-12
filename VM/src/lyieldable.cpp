@@ -27,6 +27,8 @@ void SlotManager::tooLarge() const
 // On resume, reads the yield state userdata at position 1.
 SlotManager::SlotManager(lua_State* L, bool is_init, uint8_t abi_version)
     : L(L)
+    // The stack top leads the root region
+    , requiredSize(sizeof(uint16_t))
     , bufferStackOffset(L->base - L->stack)
     , initMode(is_init)
     , abiVersion(abi_version)
@@ -55,6 +57,18 @@ SlotManager::SlotManager(lua_State* L, bool is_init, uint8_t abi_version)
         }
 
         readStoredLength();
+
+        if (storedLength < sizeof(uint16_t) + sizeof(uint8_t))
+            corrupt();
+        uint16_t top;
+        memcpy(&top, bufferData + readBaseOffset, sizeof(uint16_t));
+        // Drop whatever resume pushed above the frame
+        if (top != 0)
+        {
+            if (top > lua_gettop(L))
+                corrupt();
+            lua_settop(L, top);
+        }
     }
 
     callbacks = &L->global->cb;
@@ -69,9 +83,21 @@ SlotManager::SlotManager(lua_State* L, bool is_init, uint8_t abi_version)
 // Creates a yield state userdata at position 1 sized for the entire chain.
 // Sets bufferData and yielding on all managers so slot destructors
 // write on unwind.
-void SlotManager::flushForYield()
+void SlotManager::flushForYield(bool own_frame)
 {
     size_t totalSize = baseOffset + requiredSize;
+
+    uint16_t top = 0;
+    if (own_frame)
+    {
+        // lua_yield moves L->base past the frame's values, lua_break leaves both alone
+        StkId frame_top = L->status == LUA_YIELD ? L->base : L->top;
+        ptrdiff_t frame_size = frame_top - (L->stack + bufferStackOffset);
+        // lua_checkstack keeps C frames within LUAI_MAXCSTACK
+        static_assert(LUAI_MAXCSTACK < UINT16_MAX, "C frame size must fit the u16 stack top");
+        LUAU_ASSERT(frame_size >= 1 && frame_size < UINT16_MAX);
+        top = (uint16_t)frame_size;
+    }
 
     TValue* slot = L->stack + bufferStackOffset;
     Udata* u;
@@ -107,6 +133,7 @@ void SlotManager::flushForYield()
     char* buf = u->data;
     memset(buf, 0, totalSize);
     buf[0] = (char)abiVersion;
+    memcpy(buf + Luau::kYieldStateHeader, &top, sizeof(uint16_t));
     for (SlotManager* mgr = this; mgr; mgr = mgr->parent)
     {
         mgr->yielding = true;

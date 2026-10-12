@@ -70,7 +70,8 @@ static YieldShape readYieldShape(lua_State* thread)
         size_t size = u->len;
         std::vector<uint8_t> phases;
         // Past the version byte, each region is a u16 length, its slots with
-        // the phase first, and the innermost flag
+        // the phase first, and the innermost flag. The root region's slots
+        // follow a u16 stack top.
         size_t off = sizeof(uint8_t);
         for (;;)
         {
@@ -78,9 +79,10 @@ static YieldShape readYieldShape(lua_State* thread)
             uint16_t length;
             memcpy(&length, bytes + off, sizeof(uint16_t));
             off += sizeof(uint16_t);
-            REQUIRE(length >= 2);
+            size_t lead = phases.empty() ? sizeof(uint16_t) : 0;
+            REQUIRE(length >= lead + 2);
             REQUIRE(off + length <= size);
-            phases.push_back(bytes[off]);
+            phases.push_back(bytes[off + lead]);
             if (bytes[off + length - 1])
                 break;
             off += length;
@@ -147,12 +149,13 @@ namespace phase
 // lllevents.cpp llevents_handle_event, llltimers.cpp lltimers_tick
 constexpr uint8_t HANDLE_EVENT_CALL_HANDLER = 2;
 constexpr uint8_t TICK_CALL_HANDLER = 2;
-// lyieldstrlib.cpp str_find_match_body, str_gsub_body, yieldable_gmatch_aux
+// lyieldstrlib.cpp str_find_match_body, str_gsub_body, yieldable_gmatch_aux, yieldable_str_split
 constexpr uint8_t FIND_MATCH_CALL = 1;
 constexpr uint8_t FIND_PLAIN_YIELD = 2;
 constexpr uint8_t GSUB_MATCH_CALL = 1;
 constexpr uint8_t GSUB_REPL_CALL = 2;
 constexpr uint8_t GMATCH_MATCH_CALL = 1;
+constexpr uint8_t SPLIT_SCAN_YIELD = 1;
 // lyieldstrlib.cpp iterative_match_helper, the check at the top of its loop
 constexpr uint8_t MATCH_MAIN_YIELD = 1;
 // ltablib.cpp tsort, sort_rec, tfind
@@ -182,6 +185,7 @@ static const std::vector<YieldShape> kYieldedStdlibShapes = {
     {{phase::SORT, phase::SORT_REC_CMP_UL}},
     {{phase::ENCODE_APPEND_DATA, phase::APPEND_DATA_ARRAY_AUTO, phase::APPEND_ARRAY_REPLACER_CALL}},
     {{phase::DECODE_PROCESS_VALUE, phase::PROCESS_VALUE_ARRAY, phase::PARSE_ARRAY_REVIVER_CALL}},
+    {{phase::SPLIT_SCAN_YIELD}},
 };
 
 static const GoldenScenario kGoldenScenarios[] = {

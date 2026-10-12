@@ -34,6 +34,8 @@ LUAI_FUNC int luaH_next(lua_State* L, LuaTable* t, StkId key);
 LUAI_FUNC int luaH_getn(LuaTable* t);
 LUAI_FUNC LuaTable* luaH_clone(lua_State* L, LuaTable* tt);
 LUAI_FUNC void luaH_clear(LuaTable* tt);
+LUAI_FUNC void luaH_setreadonly(lua_State* L, LuaTable* t, bool readonly);
+LUAI_FUNC int luaH_getreadonly(LuaTable* t);
 // ServerLua: set whether or not a custom iter order should be used
 LUAI_FUNC void luaH_overrideiterorder(lua_State* L, LuaTable* t, int override);
 // ServerLua: shrink table to optimal size

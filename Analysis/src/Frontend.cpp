@@ -10,7 +10,7 @@
 #include "Luau/ConstraintSolver.h"
 #include "Luau/ControlFlowGraph.h"
 #include "Luau/DataFlowGraph.h"
-#include "Luau/DenseHash2.h"
+#include "Luau/DenseHash.h"
 #include "Luau/DumpCFG.h"
 #include "Luau/DcrLogger.h"
 #include "Luau/ExpectedTypeVisitor.h"
@@ -41,10 +41,8 @@
 LUAU_FASTINT(LuauTypeInferIterationLimit)
 LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTINT(LuauTarjanChildLimit)
-LUAU_FASTINTVARIABLE(LuauCyclicSccWarningThreshold, 4)
 
 LUAU_FASTFLAGVARIABLE(LuauKnowsTheDataModel3)
-LUAU_FASTFLAGVARIABLE(LuauFrontendSourceNodeErase)
 LUAU_FASTFLAG(LuauSolverV2)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJson)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJsonFile)
@@ -52,15 +50,19 @@ LUAU_FASTFLAGVARIABLE(DebugLuauForbidInternalTypes)
 LUAU_FASTFLAGVARIABLE(DebugLuauForceStrictMode)
 LUAU_FASTFLAGVARIABLE(DebugLuauForceNonStrictMode)
 LUAU_FASTFLAGVARIABLE(DebugLuauAlwaysShowConstraintSolvingIncomplete)
+LUAU_FASTFLAG(LuauStrictVisitInstantiatedType)
 LUAU_FASTFLAG(LuauExportValueSyntax)
 LUAU_FASTFLAGVARIABLE(LuauExportValueTypecheck)
 LUAU_FLAGVERSION(LuauExportValueTypecheck, 2)
+LUAU_FASTFLAGVARIABLE(LuauCyclicRequireTypeInference)
+LUAU_FLAGVERSION(LuauCyclicRequireTypeInference, 6)
+LUAU_FASTFLAGVARIABLE(LuauCyclicRequireTopLevelAccessError)
+LUAU_FASTFLAGVARIABLE(LuauSplitIceHandler)
 
 LUAU_FASTFLAGVARIABLE(DebugLuauForceOldSolver)
 LUAU_FASTFLAG(DebugLuauCFG)
 LUAU_FASTFLAG(DebugLuauLogCFG)
 LUAU_FASTFLAG(DebugLuauDumpCFGJson)
-LUAU_FASTFLAGVARIABLE(DebugLuauCyclicRequireTypeInference)
 
 namespace Luau
 {
@@ -280,7 +282,7 @@ ErrorVec accumulateErrors(
     const ModuleName& name
 )
 {
-    DenseHashSet<ModuleName> seen{{}};
+    DenseHashSet<ModuleName> seen;
     std::vector<ModuleName> queue{name};
 
     ErrorVec result;
@@ -360,7 +362,7 @@ std::vector<RequireCycle> getRequireCycles(
 {
     std::vector<RequireCycle> result;
 
-    DenseHashSet<const SourceNode*> seen(nullptr);
+    DenseHashSet<const SourceNode*> seen;
     std::vector<const SourceNode*> stack;
     std::vector<const SourceNode*> path;
 
@@ -509,7 +511,7 @@ void Frontend::parseModules(const std::vector<ModuleName>& names)
 {
     LUAU_TIMETRACE_SCOPE("Frontend::parseModules", "Frontend");
 
-    DenseHashSet<Luau::ModuleName> seen{{}};
+    DenseHashSet<Luau::ModuleName> seen;
 
     for (const ModuleName& name : names)
     {
@@ -552,17 +554,18 @@ CheckResult Frontend::check(const ModuleName& name, std::optional<FrontendOption
 
     std::vector<ModuleName> buildQueue;
     bool cycleDetected = parseGraph(buildQueue, name, makeTypeCheckLimits(frontendOptions), frontendOptions.forAutocomplete);
-    if (FFlag::DebugLuauCyclicRequireTypeInference)
+    if (FFlag::LuauCyclicRequireTypeInference)
         computeSCCs(buildQueue);
 
-    DenseHashSet<Luau::ModuleName> seen{{}};
+    DenseHashSet<Luau::ModuleName> seen;
     std::vector<BuildQueueItem> buildQueueItems;
     addBuildQueueItems(buildQueueItems, buildQueue, cycleDetected, seen, frontendOptions);
     LUAU_ASSERT(!buildQueueItems.empty());
 
     if (FFlag::DebugLuauLogSolverToJson)
     {
-        // TODO CLI-215634: Consider how to best represent cycles in the timetravel debugger. For now, we just log the first module in the cycle, which isn't ideal but at least gives some visibility.
+        // TODO CLI-215634: Consider how to best represent cycles in the timetravel debugger. For now, we just log the first module in the cycle,
+        // which isn't ideal but at least gives some visibility.
         LUAU_ASSERT(buildQueueItems.back().modules[0].name == name);
         buildQueueItems.back().recordJsonLog = true;
     }
@@ -574,7 +577,7 @@ CheckResult Frontend::check(const ModuleName& name, std::optional<FrontendOption
 
     for (const BuildQueueItem& item : buildQueueItems)
     {
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
         {
             for (const BuildQueueModuleInfo& moduleInfo : item.modules)
             {
@@ -636,7 +639,7 @@ std::vector<ModuleName> Frontend::checkQueuedModules(
     std::vector<ModuleName> currModuleQueue;
     std::swap(currModuleQueue, moduleQueue);
 
-    DenseHashSet<Luau::ModuleName> seen{{}};
+    DenseHashSet<Luau::ModuleName> seen;
 
     std::shared_ptr<BuildQueueWorkState> state = std::make_shared<BuildQueueWorkState>();
 
@@ -663,7 +666,7 @@ std::vector<ModuleName> Frontend::checkQueuedModules(
             }
         );
 
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
             computeSCCs(queue);
         addBuildQueueItems(state->buildQueueItems, queue, cycleDetected, seen, frontendOptions);
     }
@@ -676,7 +679,7 @@ std::vector<ModuleName> Frontend::checkQueuedModules(
 
     for (size_t i = 0; i < state->buildQueueItems.size(); i++)
     {
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
         {
             for (const BuildQueueModuleInfo& moduleInfo : state->buildQueueItems[i].modules)
             {
@@ -708,7 +711,7 @@ std::vector<ModuleName> Frontend::checkQueuedModules(
     {
         BuildQueueItem& item = state->buildQueueItems[i];
 
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
         {
             for (const BuildQueueModuleInfo& moduleInfo : item.modules)
             {
@@ -790,7 +793,7 @@ std::vector<ModuleName> Frontend::checkQueuedModules(
                 if (item.exception)
                     itemWithException = i;
 
-                if (FFlag::DebugLuauCyclicRequireTypeInference)
+                if (FFlag::LuauCyclicRequireTypeInference)
                 {
                     if (!itemWithException && !cancelled)
                     {
@@ -871,7 +874,7 @@ std::vector<ModuleName> Frontend::checkQueuedModules(
 
     for (size_t i = 0; i < state->buildQueueItems.size(); i++)
     {
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
         {
             for (BuildQueueModuleInfo& moduleInfo : state->buildQueueItems[i].modules)
             {
@@ -965,7 +968,7 @@ bool Frontend::parseGraph(
         Permanent
     };
 
-    DenseHashMap<SourceNode*, Mark> seen(nullptr);
+    DenseHashMap<SourceNode*, Mark> seen;
     std::vector<SourceNode*> stack;
     std::vector<SourceNode*> path;
     bool cyclic = false;
@@ -1061,22 +1064,16 @@ bool Frontend::parseGraph(
     return cyclic;
 }
 
-static bool moduleHasExports(const SourceModule& sourceModule)
+static bool moduleHasTopLevelReturn(const SourceModule& sourceModule)
 {
     if (!sourceModule.root)
         return false;
 
     for (AstStat* stat : sourceModule.root->body)
     {
-        if (AstStatLocal* local = stat->as<AstStatLocal>())
+        if (stat->is<AstStatReturn>())
         {
-            if (local->isExported)
-                return true;
-        }
-        else if (AstStatLocalFunction* func = stat->as<AstStatLocalFunction>())
-        {
-            if (func->name->isExported)
-                return true;
+            return true;
         }
     }
 
@@ -1094,7 +1091,7 @@ static std::vector<ModuleSCCPtr> computeTarjanSCCs(
     if (N == 0)
         return {};
 
-    DenseHashMap2<ModuleName, size_t> nameToVertex;
+    DenseHashMap<ModuleName, size_t> nameToVertex;
     for (size_t i = 0; i < N; i++)
         nameToVertex[buildQueue[i]] = i;
 
@@ -1119,8 +1116,8 @@ static std::vector<ModuleSCCPtr> computeTarjanSCCs(
 
     struct TarjanNode
     {
-        int index = -1; // discovery order (-1 = unvisited)
-        int lowlink = 0; // lowest index reachable from this vertex's DFS subtree
+        int index = -1;       // discovery order (-1 = unvisited)
+        int lowlink = 0;      // lowest index reachable from this vertex's DFS subtree
         bool onStack = false; // currently on the SCC candidate stack
     };
 
@@ -1216,7 +1213,7 @@ static std::vector<ModuleSCCPtr> computeTarjanSCCs(
 
 void Frontend::computeSCCs(const std::vector<ModuleName>& buildQueue)
 {
-    LUAU_ASSERT(FFlag::DebugLuauCyclicRequireTypeInference);
+    LUAU_ASSERT(FFlag::LuauCyclicRequireTypeInference);
 
     // Clear stale SCC data
     for (const ModuleName& name : buildQueue)
@@ -1231,21 +1228,23 @@ void Frontend::computeSCCs(const std::vector<ModuleName>& buildQueue)
 
     for (const ModuleSCCPtr& scc : foundSCCs)
     {
-        // Only register SCCs where all members use `export` — those have runtime
-        // placeholder support for cyclic requires. Mixed SCCs with non-export modules
-        // will crash at runtime, so they go through the old per-module path.
-        bool allMembersUseExport = true;
+        // Only group modules with no top-level return statement into an SCC — a top-level return is
+        // incompatible with cyclic type inference. This is broader than what the runtime supports (a
+        // module with neither an export nor a return still throws at runtime), but that divergence is
+        // intentional for now, as this module could be mid-edit, and we don't want to raise a cyclic-require
+        // error prematurely.
+        bool allMembersAreValid = true;
         for (const ModuleName& member : scc->members)
         {
             auto it = sourceModules.find(member);
-            if (it == sourceModules.end() || !it->second || !moduleHasExports(*it->second))
+            if (it == sourceModules.end() || !it->second || moduleHasTopLevelReturn(*it->second))
             {
-                allMembersUseExport = false;
+                allMembersAreValid = false;
                 break;
             }
         }
 
-        if (!allMembersUseExport)
+        if (!allMembersAreValid)
             continue;
 
         for (const ModuleName& member : scc->members)
@@ -1267,7 +1266,7 @@ void Frontend::addBuildQueueItems(
 )
 {
     // Map SCC pointer to item index for grouping SCC members into a single BuildQueueItem
-    DenseHashMap2<ModuleSCC*, size_t> sccToItemIndex;
+    DenseHashMap<ModuleSCC*, size_t> sccToItemIndex;
 
     for (const ModuleName& moduleName : buildQueue)
     {
@@ -1304,7 +1303,7 @@ void Frontend::addBuildQueueItems(
         sourceModule->cyclic = !moduleInfo.requireCycles.empty();
 
         // Check if this module belongs to an SCC that should be grouped
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
         {
             if (ModuleSCCPtr* sccPtr = sccs.find(moduleName))
             {
@@ -1317,7 +1316,8 @@ void Frontend::addBuildQueueItems(
                     {
                         scc->sharedArena = std::make_shared<TypeArena>();
 
-                        // Register placeholder modules so require() of SCC peers resolves to a BlockedType during constraint generation (later updated to its actual type during constraint solving)
+                        // Register placeholder modules so require() of SCC peers resolves to a BlockedType during constraint generation (later
+                        // updated to its actual type during constraint solving)
                         for (const ModuleName& member : scc->members)
                         {
                             TypeId placeholderReturnType = scc->sharedArena->addType(BlockedType{});
@@ -1380,6 +1380,95 @@ static void applyInternalLimitScaling(SourceNode& sourceNode, const ModulePtr mo
         sourceNode.autocompleteLimitsMult = std::min(sourceNode.autocompleteLimitsMult * 2.0, 1.0);
 }
 
+struct CyclicTopLevelAccessVisitor : public AstVisitor
+{
+    NotNull<const DenseHashMap<Name, ModuleName>> peerImports;
+    NotNull<std::vector<TypeError>> errors;
+    ModuleName moduleName;
+
+    CyclicTopLevelAccessVisitor(
+        NotNull<const DenseHashMap<Name, ModuleName>> peerImports,
+        NotNull<std::vector<TypeError>> errors,
+        ModuleName moduleName
+    )
+        : peerImports(peerImports)
+        , errors(errors)
+        , moduleName(std::move(moduleName))
+    {
+    }
+
+    bool visit(AstExprFunction*) override
+    {
+        return false;
+    }
+
+    bool visit(AstExprIndexName* node) override
+    {
+        if (auto* local = node->expr->as<AstExprLocal>())
+        {
+            if (const ModuleName* target = peerImports->find(local->local->name.value))
+                errors->emplace_back(
+                    node->location,
+                    moduleName,
+                    CyclicModuleTopLevelAccess{*target, std::string{local->local->name.value}, std::string{node->index.value}}
+                );
+        }
+        return true;
+    }
+
+    bool visit(AstExprIndexExpr* node) override
+    {
+        if (auto* local = node->expr->as<AstExprLocal>())
+        {
+            if (const ModuleName* target = peerImports->find(local->local->name.value))
+            {
+                std::string propName;
+                if (auto* constStr = node->index->as<AstExprConstantString>())
+                    propName = std::string{constStr->value.data, constStr->value.size};
+
+                errors->emplace_back(
+                    node->location, moduleName, CyclicModuleTopLevelAccess{*target, std::string{local->local->name.value}, std::move(propName)}
+                );
+            }
+        }
+        return true;
+    }
+};
+
+static void errorOnCyclicTopLevelAccess(const SourceModule& sourceModule, const ModulePtr& module, const std::vector<ModuleName>& sccMembers)
+{
+    LUAU_ASSERT(FFlag::LuauCyclicRequireTopLevelAccessError);
+
+    ScopePtr rootScope = module->getModuleScope();
+    if (!rootScope || rootScope->importedModules.empty())
+        return;
+
+    DenseHashSet<ModuleName> peerSet;
+    for (const auto& member : sccMembers)
+    {
+        if (member != sourceModule.name)
+            peerSet.insert(member);
+    }
+
+    if (peerSet.empty())
+        return;
+
+    DenseHashMap<Name, ModuleName> peerImports;
+    for (const auto& [localName, importedModule] : rootScope->importedModules)
+    {
+        if (peerSet.contains(importedModule))
+            peerImports[localName] = importedModule;
+    }
+
+    if (peerImports.empty())
+        return;
+
+    CyclicTopLevelAccessVisitor visitor{NotNull{&peerImports}, NotNull{&module->errors}, sourceModule.name};
+
+    for (AstStat* stat : sourceModule.root->body)
+        stat->visit(&visitor);
+}
+
 void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
 {
     ModuleSCCPtr scc = item.scc;
@@ -1387,12 +1476,13 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
 
     TypeCheckLimits typeCheckLimits = makeTypeCheckLimits(item.options);
 
-    UnifierSharedState unifierState{NotNull{&iceHandler}};
+    InternalErrorReporter iceHandler{onInternalError};
+    UnifierSharedState unifierState{NotNull{FFlag::LuauSplitIceHandler ? &iceHandler : &iceHandler_DEPRECATED}};
     unifierState.counters.recursionLimit = FInt::LuauTypeInferRecursionLimit;
     unifierState.counters.iterationLimit = typeCheckLimits.unifierIterationLimit.value_or(FInt::LuauTypeInferIterationLimit);
 
     Normalizer normalizer{scc->sharedArena.get(), builtinTypes, NotNull{&unifierState}, SolverMode::New};
-    TypeFunctionRuntime typeFunctionRuntime{NotNull{&iceHandler}, NotNull{&typeCheckLimits}};
+    TypeFunctionRuntime typeFunctionRuntime{NotNull{FFlag::LuauSplitIceHandler ? &iceHandler : &iceHandler_DEPRECATED}, NotNull{&typeCheckLimits}};
     typeFunctionRuntime.allowEvaluation = true;
 
     // Per-module ConstraintGenerator data for this SCC that needs to be preserved for later use in the ConstraintSolver
@@ -1407,6 +1497,7 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
     std::unique_ptr<ConstraintGraph> cgraph = std::make_unique<ConstraintGraph>(builtinTypes);
 
     std::vector<TypeError> mergedErrors;
+    std::vector<ConstraintPtr> mergedDeferredConstraints;
 
     // Run constraint generation for each module
     for (size_t i = 0; i < item.modules.size(); i++)
@@ -1437,11 +1528,17 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
         module->names = sourceModule.names;
         module->root = sourceModule.root;
 
-        iceHandler.moduleName = sourceModule.name;
+        if (FFlag::LuauSplitIceHandler)
+            iceHandler.moduleName = sourceModule.name;
+        else
+            iceHandler_DEPRECATED.moduleName = sourceModule.name;
 
-        cgData[i].dfg = std::make_unique<DataFlowGraph>(
-            DataFlowGraphBuilder::build(sourceModule.root, NotNull{&module->defArena}, NotNull{&module->keyArena}, NotNull{&iceHandler})
-        );
+        cgData[i].dfg = std::make_unique<DataFlowGraph>(DataFlowGraphBuilder::build(
+            sourceModule.root,
+            NotNull{&module->defArena},
+            NotNull{&module->keyArena},
+            NotNull{FFlag::LuauSplitIceHandler ? &iceHandler : &iceHandler_DEPRECATED}
+        ));
 
         ScopePtr environmentScope = moduleInfo.environmentScope;
 
@@ -1457,7 +1554,7 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
             NotNull{&typeFunctionRuntime},
             NotNull{&moduleResolver},
             builtinTypes,
-            NotNull{&iceHandler},
+            NotNull{FFlag::LuauSplitIceHandler ? &iceHandler : &iceHandler_DEPRECATED},
             environmentScope ? environmentScope : globals.globalScope,
             globals.globalTypeFunctionScope,
             std::move(prepareModuleScopeWrap),
@@ -1467,10 +1564,22 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
             NotNull{cgraph.get()}
         };
 
-        cg.visitModuleRoot(sourceModule.root);
+        ConstraintSet cgResult = cg.run(sourceModule.root);
         module->constraintGenerationDidNotComplete = cg.recursionLimitMet;
 
         cgData[i].cgScopes = std::move(cg.scopes);
+        for (auto& deferred : cgResult.deferredConstraints)
+            mergedDeferredConstraints.push_back(std::move(deferred));
+
+        // Synthesize exports table early so subsequent modules in the SCC can
+        // see the correct table shape (with free types) during their CG pass.
+        // Without this, export-only modules (no explicit return) would have an
+        // empty return type in the placeholder, causing peers to see unknown.
+        if (FFlag::LuauExportValueSyntax && FFlag::LuauExportValueTypecheck)
+        {
+            module->scopes = cgData[i].cgScopes;
+            synthesizeExportReturn(builtinTypes, NotNull{module.get()});
+        }
 
         // Bind the placeholder BlockedType to the actual return type so subsequent
         // modules in this SCC see real types when they require() this one.
@@ -1490,9 +1599,12 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
             {
                 emplaceType<BoundType>(asMutable(*placeholderHead), *actualHead);
             }
+
+            // Copy exported type bindings so subsequent CG passes can import them
+            placeholderModule->exportedTypeBindings = cgData[i].cgScopes[0].second->exportedTypeBindings;
         }
 
-        mergedErrors.insert(mergedErrors.end(), std::make_move_iterator(cg.errors.begin()), std::make_move_iterator(cg.errors.end()));
+        mergedErrors.insert(mergedErrors.end(), std::make_move_iterator(cgResult.errors.begin()), std::make_move_iterator(cgResult.errors.end()));
         moduleInfo.module = std::move(module);
     }
 
@@ -1503,11 +1615,18 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
         NotNull{rootScope.get()},
         {},
         {},
-        DenseHashMap<Scope*, TypeId>{nullptr},
-        {}
+        DenseHashMap<Scope*, TypeId>{},
+        {},
+        std::move(mergedDeferredConstraints),
     };
 
-    Subtyping subtyping{builtinTypes, NotNull{scc->sharedArena.get()}, NotNull{&normalizer}, NotNull{&typeFunctionRuntime}, NotNull{&iceHandler}};
+    Subtyping subtyping{
+        builtinTypes,
+        NotNull{scc->sharedArena.get()},
+        NotNull{&normalizer},
+        NotNull{&typeFunctionRuntime},
+        NotNull{FFlag::LuauSplitIceHandler ? &iceHandler : &iceHandler_DEPRECATED}
+    };
 
     ConstraintSolver cs{
         NotNull{&normalizer},
@@ -1540,7 +1659,7 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
 
     // Partition CG + solver errors to the appropriate modules by moduleName
     {
-        DenseHashMap2<ModuleName, ModulePtr> nameToModule;
+        DenseHashMap<ModuleName, ModulePtr> nameToModule;
         for (const BuildQueueModuleInfo& moduleInfo : item.modules)
             nameToModule[moduleInfo.name] = moduleInfo.module;
 
@@ -1567,6 +1686,9 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
         module->scopes = std::move(cgData[i].cgScopes);
         module->type = sourceModule.type;
 
+        if (FFlag::LuauSplitIceHandler)
+            iceHandler.moduleName = sourceModule.name;
+
         if (module->timeout || module->cancelled)
         {
             ScopePtr moduleScope = module->getModuleScope();
@@ -1588,7 +1710,7 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
                     Luau::checkNonStrict(
                         builtinTypes,
                         NotNull{&typeFunctionRuntime},
-                        NotNull{&iceHandler},
+                        NotNull{FFlag::LuauSplitIceHandler ? &iceHandler : &iceHandler_DEPRECATED},
                         NotNull{&unifierState},
                         NotNull{cgData[i].dfg.get()},
                         NotNull{&typeCheckLimits},
@@ -1623,12 +1745,9 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
             }
         }
 
-        if (FFlag::LuauExportValueSyntax && FFlag::LuauExportValueTypecheck && !module->timeout && !module->cancelled)
-            synthesizeExportReturn(builtinTypes, NotNull{module.get()});
-
         // Clone public interface
         unfreeze(module->interfaceTypes);
-        module->clonePublicInterface(builtinTypes, iceHandler, SolverMode::New);
+        module->clonePublicInterface(builtinTypes, FFlag::LuauSplitIceHandler ? iceHandler : iceHandler_DEPRECATED, SolverMode::New);
 
         if (module->mode == Mode::NoCheck)
         {
@@ -1650,18 +1769,18 @@ void Frontend::checkSCCBuildQueueItem(BuildQueueItem& item)
     for (BuildQueueModuleInfo& moduleInfo : item.modules)
         freeze(moduleInfo.module->interfaceTypes);
 
-    // Emit a warning on the first SCC member if the cycle is large enough.
-    if (FInt::LuauCyclicSccWarningThreshold > 0 && scc->members.size() >= static_cast<size_t>(FInt::LuauCyclicSccWarningThreshold))
+    // Check for top-level accesses to cyclic peer modules
+    if (FFlag::LuauCyclicRequireTopLevelAccessError)
     {
-        item.modules[0].module->errors.emplace_back(
-            Location{}, item.modules[0].name, CyclicModuleGraphTooLarge{scc->members.size(), scc->members}
-        );
+        for (BuildQueueModuleInfo& moduleInfo : item.modules)
+            errorOnCyclicTopLevelAccess(*moduleInfo.sourceModule, moduleInfo.module, scc->members);
     }
 }
 
 void Frontend::checkBuildQueueItem(BuildQueueItem& item)
 {
-    if (FFlag::DebugLuauCyclicRequireTypeInference && item.scc && item.modules.size() > 1)
+    // Check every SCC in its shared arena, including single-member self-loops.
+    if (FFlag::LuauCyclicRequireTypeInference && item.scc && (item.modules.size() == item.scc->members.size()))
     {
         checkSCCBuildQueueItem(item);
         return;
@@ -1743,7 +1862,14 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
     }
 
     ModulePtr module = check(
-        sourceModule, mode, requireCycles, environmentScope, /*forAutocomplete*/ false, item.recordJsonLog, moduleInfo.stats, std::move(typeCheckLimits)
+        sourceModule,
+        mode,
+        requireCycles,
+        environmentScope,
+        /*forAutocomplete*/ false,
+        item.recordJsonLog,
+        moduleInfo.stats,
+        std::move(typeCheckLimits)
     );
 
     double duration = getTimestamp() - timestamp;
@@ -1809,6 +1935,11 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
         module->astForInNextTypes.clear();
         module->astResolvedTypes.clear();
         module->astResolvedTypePacks.clear();
+        if (FFlag::LuauStrictVisitInstantiatedType)
+        {
+            module->astTypeReferenceLookupFailures.clear();
+            module->astTypePackReferenceLookupFailures.clear();
+        }
         module->astCompoundAssignResultTypes.clear();
         module->astScopes.clear();
         module->upperBoundContributors.clear();
@@ -1819,8 +1950,22 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
     {
         for (const RequireCycle& cyc : requireCycles)
         {
-            TypeError te{cyc.location, moduleInfo.name, ModuleHasCyclicDependency{cyc.path}};
+            std::vector<ModuleName> cycleModules;
+            if (FFlag::LuauCyclicRequireTypeInference)
+            {
+                for (const ModuleName& name : cyc.path)
+                {
+                    auto it = sourceModules.find(name);
+                    if (it == sourceModules.end() || !it->second || moduleHasTopLevelReturn(*it->second))
+                        cycleModules.push_back(name);
+                }
+            }
+            else
+            {
+                cycleModules = cyc.path;
+            }
 
+            TypeError te{cyc.location, moduleInfo.name, ModuleHasCyclicDependency{std::move(cycleModules)}};
             module->errors.push_back(te);
         }
     }
@@ -1840,7 +1985,7 @@ void Frontend::checkBuildQueueItems(std::vector<BuildQueueItem>& items)
     {
         checkBuildQueueItem(item);
 
-        if (FFlag::DebugLuauCyclicRequireTypeInference)
+        if (FFlag::LuauCyclicRequireTypeInference)
         {
             bool cancelled = false;
             for (const BuildQueueModuleInfo& moduleInfo : item.modules)
@@ -1919,7 +2064,7 @@ void Frontend::recordItemResult(const BuildQueueItem& item)
         stats.dynamicConstraintsCreated += moduleInfo.stats.dynamicConstraintsCreated;
     };
 
-    if (FFlag::DebugLuauCyclicRequireTypeInference)
+    if (FFlag::LuauCyclicRequireTypeInference)
     {
         for (const BuildQueueModuleInfo& moduleInfo : item.modules)
             recordModuleInfo(moduleInfo);
@@ -2078,7 +2223,7 @@ void Frontend::traverseDependents(const ModuleName& name, std::function<bool(Sou
         if (!processSubtree(sourceNode))
             continue;
 
-        const Set<ModuleName>& dependents = sourceNode.dependents;
+        const DenseHashSet<ModuleName>& dependents = sourceNode.dependents;
         queue.insert(queue.end(), dependents.begin(), dependents.end());
     }
 }
@@ -2218,7 +2363,8 @@ ModulePtr check(
             printf("%s", dumpCFG(*cfg).c_str());
         if (FFlag::DebugLuauDumpCFGJson)
             printf("%s\n", dumpCFGJson(*cfg).c_str());
-        state = std::make_unique<CFG::TypeStateMap>(NotNull{module->internalTypes.get()}, NotNull{parentScope.get()}, builtinTypes, NotNull{cfg.get()});
+        state =
+            std::make_unique<CFG::TypeStateMap>(NotNull{module->internalTypes.get()}, NotNull{parentScope.get()}, builtinTypes, NotNull{cfg.get()});
         state->computeTypes();
     }
 
@@ -2437,6 +2583,8 @@ ModulePtr Frontend::check(
                 prepareModuleScope(name, scope, forAutocomplete);
         };
 
+        InternalErrorReporter iceHandler{onInternalError, sourceModule.name};
+
         try
         {
             return Luau::check(
@@ -2444,7 +2592,7 @@ ModulePtr Frontend::check(
                 mode,
                 requireCycles,
                 builtinTypes,
-                NotNull{&iceHandler},
+                NotNull{FFlag::LuauSplitIceHandler ? &iceHandler : &iceHandler_DEPRECATED},
                 NotNull{forAutocomplete ? &moduleResolverForAutocomplete : &moduleResolver},
                 NotNull{fileResolver},
                 environmentScope ? *environmentScope : globals.globalScope,
@@ -2466,11 +2614,13 @@ ModulePtr Frontend::check(
     }
     else
     {
+        InternalErrorReporter iceHandler{onInternalError, sourceModule.name};
+
         TypeChecker typeChecker(
             forAutocomplete ? globalsForAutocomplete.globalScope : globals.globalScope,
             forAutocomplete ? &moduleResolverForAutocomplete : &moduleResolver,
             builtinTypes,
-            &iceHandler
+            FFlag::LuauSplitIceHandler ? &iceHandler : &iceHandler_DEPRECATED
         );
 
         if (prepareModuleScope)
@@ -2519,29 +2669,22 @@ std::pair<SourceNode*, SourceModule*> Frontend::getSourceNode(const ModuleName& 
 
     if (!source)
     {
-        if (FFlag::LuauFrontendSourceNodeErase)
+        if (auto it = sourceNodes.find(name); it != sourceNodes.end())
         {
-            if (auto it = sourceNodes.find(name); it != sourceNodes.end())
+            // Remove this module from the dependents set of each of its dependencies
+            for (const ModuleName& dep : it->second->requireSet)
             {
-                // Remove this module from the dependents set of each of its dependencies
-                for (const ModuleName& dep : it->second->requireSet)
-                {
-                    if (auto depIt = sourceNodes.find(dep); depIt != sourceNodes.end())
-                        depIt->second->dependents.erase(name);
-                }
-
-                sourceNodes.erase(it);
+                if (auto depIt = sourceNodes.find(dep); depIt != sourceNodes.end())
+                    depIt->second->dependents.erase(name);
             }
 
-            sourceModules.erase(name);
-            requireTrace.erase(name);
-            moduleResolver.eraseModule(name);
-            moduleResolverForAutocomplete.eraseModule(name);
+            sourceNodes.erase(it);
         }
-        else
-        {
-            sourceModules.erase(name);
-        }
+
+        sourceModules.erase(name);
+        requireTrace.erase(name);
+        moduleResolver.eraseModule(name);
+        moduleResolverForAutocomplete.eraseModule(name);
 
         return {nullptr, nullptr};
     }
@@ -2874,7 +3017,7 @@ TypeId Frontend::parseType(
 
     TypeId t = cg.resolveType(globals.globalScope, parseResult.root, false);
 
-    bool hasConstraints = FFlag::DebugLuauCyclicRequireTypeInference ? !cg.cgraph->constraints.empty() : !cg.constraints.empty();
+    bool hasConstraints = FFlag::LuauCyclicRequireTypeInference ? !cg.cgraph->constraints.empty() : !cg.constraints.empty();
     if (hasConstraints)
     {
         iceHandler->ice("Not yet implemented: parseType cannot reduce other type aliases");

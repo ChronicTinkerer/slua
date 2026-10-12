@@ -32,3 +32,6 @@ __pycache__
 !/fuzz/corpus/json/*.json
 *.code-workspace
 *.tar.bz2
+
+# Golden-test captured outputs for user debugging
+*.output.tmp

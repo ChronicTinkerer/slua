@@ -83,6 +83,21 @@ do
   assert(ok4 and result == "A B C")
 end
 
+-- values passed to resume reach a coroutine.yield inside a gsub callback
+do
+  local co = coroutine.create(function()
+    return string.gsub("a b", "%w", function(w)
+      return coroutine.yield(w)
+    end)
+  end)
+  local ok1, v1 = coroutine.resume(co)
+  assert(ok1 and v1 == "a")
+  local ok2, v2 = coroutine.resume(co, "X")
+  assert(ok2 and v2 == "b")
+  local ok3, result = coroutine.resume(co, "Y")
+  assert(ok3 and result == "X Y")
+end
+
 -- Ares round-trip: serialize gsub coroutine with empty then partial buffer
 do
   local co = coroutine.wrap(function()
@@ -236,7 +251,8 @@ local function consume_impl(check, expect_yields, f, ...)
       co = ares.unpersist(ares.persist(co))
       collectgarbage()
     end
-    ok, a, b, c = coroutine.resume(co)
+    -- Yieldables have to drop values passed to resume
+    ok, a, b, c = coroutine.resume(co, "junk", "junk")
     assert(ok, a)
   end
   if expect_yields then
@@ -283,6 +299,51 @@ do
     return string.find(s, p, 1, true)
   end)
   assert(i == 5001 and j == 10001, `plain find match failed: i={i} j={j}`)
+end
+
+-- split past the plain work gate, long separator: checks at every candidate
+do
+  local s = string.rep("a", 10000) .. "b" .. "tail"
+  local sep = string.rep("a", 5000) .. "b"
+  local t = consume(function()
+    return string.split(s, sep)
+  end)
+  assert(#t == 2 and t[1] == string.rep("a", 5000) and t[2] == "tail", "long separator split failed")
+end
+
+-- split, short separator: budgeted checks, result table grows across yields.
+-- The "=" runs in each piece are candidates that don't match.
+do
+  local sep = string.rep("=", 99) .. "|"
+  local pieces = {}
+  for i = 1, 200 do
+    pieces[i] = `{string.rep("=", 50)}{i}`
+  end
+  local t = consume(function()
+    return string.split(table.concat(pieces, sep), sep)
+  end)
+  assert(#t == #pieces, `expected {#pieces} pieces, got {#t}`)
+  for i, piece in pieces do
+    assert(t[i] == piece, `piece {i} mismatch`)
+  end
+end
+
+-- split, leading/trailing and back-to-back separators
+do
+  local sep = string.rep("a", 600) .. "b"
+  local mid = string.rep("x", 2000)
+  local t = consume(function()
+    return string.split(sep .. mid .. sep, sep)
+  end)
+  assert(#t == 3 and t[1] == "" and t[2] == mid and t[3] == "", "leading/trailing split failed")
+
+  t = consume(function()
+    return string.split(string.rep("a", 3000), string.rep("a", 600))
+  end)
+  assert(#t == 6, `expected 6 pieces, got {#t}`)
+  for _, piece in t do
+    assert(piece == "", "expected empty pieces")
+  end
 end
 
 -- zero-length match advancement with interrupts
@@ -435,6 +496,17 @@ do
   assert_interrupt_bounded("nospecials find (short pattern)", 0.0001, function()
     assert(string.find(s, p) == nil, "should not match")
   end)
+end
+
+-- split runs the same literal search, gated the same way
+do
+  local s = string.rep("a", N)
+  for _, sep in { string.rep("a", N // 2) .. "b", string.rep("a", 511) .. "b" } do
+    assert_interrupt_bounded(`split ({#sep} char separator)`, 0.0001, function()
+      local t = string.split(s, sep)
+      assert(#t == 1 and t[1] == s, "should not split")
+    end)
+  end
 end
 
 do

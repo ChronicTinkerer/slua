@@ -66,8 +66,6 @@ THE SOFTWARE.
 #include "Luau/BytecodeWire.h"
 #include "Luau/ByteStream.h"
 
-LUAU_FASTFLAG(LuauCIProto)
-LUAU_FASTFLAG(LuauManagedDebugNames)
 
 /*
 ** {===========================================================================
@@ -184,6 +182,7 @@ typedef uint64_t ares_size_t;
 #define ERIS_ERR_TABLE_COUNT "table had a different key count after "\
                                 "deserialize, expected %d, got %d"
 #define ERIS_ERR_THREAD "cannot persist currently running thread"
+#define ERIS_ERR_FINALIZERS "cannot persist coroutine finalizers"
 #define ERIS_ERR_THREADCI "invalid callinfo"
 #define ERIS_ERR_UPVAL_IDX "invalid upvalue index %d"
 #define ERIS_ERR_THREADCTX "bad C continuation function"
@@ -701,6 +700,8 @@ ares_type_from_lua(Info *info, int type) {
     case LUA_TDEADKEY: return ARES_T_DEADKEY;
     case LUA_TPROTO: return ARES_T_PROTO;
     case LUA_TUPVAL: return ARES_T_UPVAL;
+    /* A count, never a tag on a live value. */
+    case LUA_T_ALL: break;
   }
   eris_error(info, ERIS_ERR_TYPEP, type);
 }
@@ -1599,7 +1600,8 @@ static void p_table(Info *info) {                                  /* ... tbl */
   const TValue *table_tv = luaA_toobject(info->L, -1);
   eris_assert(ttistable(table_tv));
   LuaTable* table = hvalue(table_tv);
-  WRITE_VALUE(table->readonly, uint8_t);
+  // The metamethod cache bit is a layout detail, rebuilt by lua_setreadonly() on load.
+  WRITE_VALUE(luaH_getreadonly(table), uint8_t);
   WRITE_VALUE(table->safeenv, uint8_t);
   int hash_size = (table->node == &luaH_dummynode) ? 0 : sizenode(table);
   WRITE_VALUE(table->sizearray, int);
@@ -2471,14 +2473,10 @@ u_upval(Info *info) {                                                  /* ... */
 
 /** ======================================================================== */
 
-/* Which of the two fields holds the name depends on LuauManagedDebugNames,
- * exactly as in getfuncname(). May return NULL. */
+/* May return NULL. */
 static const char *
 cclosure_debugname(Closure *cl) {
-  if (FFlag::LuauManagedDebugNames) {
-    return cl->c.debugname ? getstr(cl->c.debugname) : NULL;
-  }
-  return cl->c.debugname_DEPRECATED;
+  return cl->c.debugname ? getstr(cl->c.debugname) : NULL;
 }
 
 /* For Lua closures we write the upvalue ID, which is usually the memory
@@ -2847,6 +2845,12 @@ p_thread(Info *info) {                                          /* ... thread */
     return; /* not reached */
   }
 
+  // The format doesn't carry coroutine.finally() callbacks yet, refuse rather than drop them.
+  if (thread->finalizers != nullptr) {
+    eris_error(info, ERIS_ERR_FINALIZERS);
+    return; /* not reached */
+  }
+
   /* Persist the globals table for the thread */
   lua_getfenv(info->L, -1);                                  /* ... thread gt */
   persist(info);
@@ -2941,10 +2945,8 @@ p_thread(Info *info) {                                          /* ... thread */
 
     if (eris_isLua(ci)) {
       WRITE_VALUE(ERIS_CI_KIND_LUA, uint8_t);
-      const Closure *lcl = eris_ci_func(ci);
-
       // savedpc is relative to the frame's proto, not the closure's current one.
-      const Proto *p = FFlag::LuauCIProto ? ci->p : lcl->l.p;
+      const Proto *p = ci->p;
 
       // Inliner output: regenerated at runtime, so no yieldpoints and pcs that mean
       // nothing once reloaded.

@@ -99,12 +99,9 @@ a = {"\xE1lo", "\0first :-)", "alo", "then this one", "45", "and a new"}
 table.sort(a)
 check(a)
 
--- ServerLua: If I'm being totally honest, I don't understand _what_ this was originally
--- meant to test since it used some `loadstring()` shenanigans with no explanation.
--- It's from the original Lua test suite, and we changed `rehash()` to not mess with
--- `table->sizearray` as the test was implicitly doing before. Just explicitly do it.
+-- check for 'table modified during sorting'
 local ok = pcall(table.sort, a, function (x, y)
-          table.insert(a, x)
+          loadstring("a[7] = ''")() -- hide the modification from the lexical scope
           collectgarbage()
           return x<y
         end)

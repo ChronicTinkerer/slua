@@ -8,6 +8,7 @@
 #include "lstate.h"
 
 #include <stdarg.h>
+#include <stdio.h>
 
 namespace Luau
 {
@@ -285,6 +286,8 @@ const char* getCmdName(IrCmd cmd)
         return "JUMP_EQ_TAG";
     case IrCmd::JUMP_CMP_INT:
         return "JUMP_CMP_INT";
+    case IrCmd::JUMP_CMP_INT64:
+        return "JUMP_CMP_INT64";
     case IrCmd::JUMP_EQ_POINTER:
         return "JUMP_EQ_POINTER";
     case IrCmd::JUMP_CMP_NUM:
@@ -347,10 +350,14 @@ const char* getCmdName(IrCmd cmd)
         return "INVOKE_FASTCALL";
     case IrCmd::CHECK_FASTCALL_RES:
         return "CHECK_FASTCALL_RES";
+    case IrCmd::INVOKE_FASTPCALL:
+        return "INVOKE_FASTPCALL";
     case IrCmd::DO_ARITH:
         return "DO_ARITH";
     case IrCmd::DO_LEN:
         return "DO_LEN";
+    case IrCmd::CONSTRUCT:
+        return "CONSTRUCT";
     case IrCmd::GET_TABLE:
         return "GET_TABLE";
     case IrCmd::SET_TABLE:
@@ -373,6 +380,8 @@ const char* getCmdName(IrCmd cmd)
         return "CHECK_NO_METATABLE";
     case IrCmd::CHECK_SAFE_ENV:
         return "CHECK_SAFE_ENV";
+    case IrCmd::CHECK_YIELDABLE:
+        return "CHECK_YIELDABLE";
     case IrCmd::CHECK_ARRAY_SIZE:
         return "CHECK_ARRAY_SIZE";
     case IrCmd::CHECK_SLOT_MATCH:
@@ -865,6 +874,10 @@ const char* getBytecodeTypeName(uint8_t type, const char* const* userdataTypes)
         return "vector";
     case LBC_TYPE_BUFFER:
         return "buffer";
+    case LBC_TYPE_CLASS:
+        return "class";
+    case LBC_TYPE_OBJECT:
+        return "object";
     case LBC_TYPE_ANY:
         return "any";
     }

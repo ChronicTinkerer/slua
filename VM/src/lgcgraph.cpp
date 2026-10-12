@@ -21,8 +21,6 @@
 #include "lstrbuf.h"
 #include "ltm.h"
 
-LUAU_FASTFLAG(LuauManagedDebugNames)
-
 struct Node
 {
     GCObject* gco;
@@ -93,16 +91,8 @@ static std::optional<std::string> gconame(GCObject *gco)
         Closure* cl = gco2cl(gco);
         if (cl->isC)
         {
-            if (FFlag::LuauManagedDebugNames)
-            {
-                if (cl->c.debugname)
-                    return std::string(getstr(cl->c.debugname));
-            }
-            else
-            {
-                if (cl->c.debugname_DEPRECATED)
-                    return std::string(cl->c.debugname_DEPRECATED);
-            }
+            if (cl->c.debugname)
+                return std::string(getstr(cl->c.debugname));
         }
         else
         {
@@ -468,6 +458,9 @@ static void graph_traverse_thread(GraphContext *ctx, GCObject *from, lua_State *
 
     for (UpVal *uv = th->openupval; uv; uv = uv->u.open.threadnext)
         graph_enqueue(ctx, from, obj2gco(uv), "openupval");
+
+    if (th->finalizers)
+        graph_enqueue(ctx, from, obj2gco(th->finalizers), "finalizers");
 }
 
 static void graph_traverse_proto(GraphContext *ctx, GCObject *from, Proto *p)
@@ -510,40 +503,12 @@ static void graph_traverse_upval(GraphContext *ctx, GCObject *from, UpVal *uv)
 
 static void graph_traverse_class(GraphContext *ctx, GCObject *from, LuauClass *lco)
 {
-    graph_enqueue(ctx, from, obj2gco(lco->name), "classname");
-    graph_enqueue(ctx, from, obj2gco(lco->memberstooffset), "classoffsets");
-
-    for (uint32_t i = 0; i < lco->numberofallmembers; ++i)
-        graph_enqueue(ctx, from, obj2gco(lco->offsettomember[i]), "membername");
-
-    // Static members are the tail of the offset space, so recover each one's
-    // name by offsetting past the instance members.
-    for (uint32_t i = 0; i < lco->numberofallmembers - lco->numberofinstancemembers; ++i)
-    {
-        if (iscollectable(&lco->staticmembers[i]))
-        {
-            const char *name = getstr(lco->offsettomember[i + lco->numberofinstancemembers]);
-            graph_enqueue(ctx, from, gcvalue(&lco->staticmembers[i]), name);
-        }
-    }
-
-    graph_enqueue(ctx, from, obj2gco(lco->metatable), "metatable");
-
-    if (lco->instancemetatable)
-        graph_enqueue(ctx, from, obj2gco(lco->instancemetatable), "instancemetatable");
+    LUAU_ASSERT_ALWAYS(!"Classes not supported");
 }
 
 static void graph_traverse_object(GraphContext *ctx, GCObject *from, LuauObject *inst)
 {
-    graph_enqueue(ctx, from, obj2gco(inst->lclass), "class");
-
-    // The instance owns this array and its count, so use those rather than
-    // reaching through the class - same as `traverseobject` in lgc.cpp.
-    for (uint32_t i = 0; i < inst->numberofmembers; ++i)
-    {
-        if (iscollectable(&inst->members[i]))
-            graph_enqueue(ctx, from, gcvalue(&inst->members[i]), getstr(inst->lclass->offsettomember[i]));
-    }
+    LUAU_ASSERT_ALWAYS(!"Classes not supported");
 }
 
 static void graph_traverse(GraphContext *ctx, GCObject *o)

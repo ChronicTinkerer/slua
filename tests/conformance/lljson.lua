@@ -619,7 +619,8 @@ local function consume_impl(check, expect_yields, f, ...)
         yields += 1
         co = ares.unpersist(ares.persist(co))
         collectgarbage()
-        ok, a, b, c = coroutine.resume(co)
+        -- Yieldables have to drop values passed to resume
+        ok, a, b, c = coroutine.resume(co, "junk", "junk")
         assert(ok, a)
     end
     if expect_yields then

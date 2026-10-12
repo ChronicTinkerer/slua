@@ -89,6 +89,10 @@ static bool hasweakvaluesemantics(GCObject* o)
 
 static void traversetable(ReachableContext* ctx, LuaTable* h)
 {
+    // luaH_setreadonly() only builds metamethod caches for system tables, so
+    // neither the sizing nor the weak clear below account for one.
+    LUAU_ASSERT(!hasmetacache(h));
+
     // Traverse metatable
     if (h->metatable)
         enqueueobj(ctx, obj2gco(h->metatable));
@@ -208,6 +212,10 @@ static void traversethread(ReachableContext* ctx, lua_State* th)
     // Traverse open upvalues
     for (UpVal* uv = th->openupval; uv; uv = uv->u.open.threadnext)
         enqueueobj(ctx, obj2gco(uv));
+
+    // Traverse pending coroutine.finally() callbacks
+    if (th->finalizers)
+        enqueueobj(ctx, obj2gco(th->finalizers));
 }
 
 static void traverseproto(ReachableContext* ctx, Proto* p)
@@ -256,41 +264,33 @@ static void traverseupval(ReachableContext* ctx, UpVal* uv)
         enqueueobj(ctx, gcvalue(uv->v));
 }
 
+// Mirrors traverseclass in lgc.cpp
 static void traverseclass(ReachableContext* ctx, LuauClass* lco)
 {
-    // Traverse class name
     enqueueobj(ctx, obj2gco(lco->name));
-
-    // Traverse the name -> offset map
+    if (lco->super)
+        enqueueobj(ctx, obj2gco(lco->super));
     enqueueobj(ctx, obj2gco(lco->memberstooffset));
 
-    // Traverse member names
     for (uint32_t i = 0; i < lco->numberofallmembers; ++i)
         enqueueobj(ctx, obj2gco(lco->offsettomember[i]));
 
-    // Traverse static members. Instance member offsets come first, so the
-    // static members are the tail of the offset space.
-    for (uint32_t i = 0; i < lco->numberofallmembers - lco->numberofinstancemembers; ++i)
+    uint32_t numberofstaticmembers = lco->numberofallmembers - lco->numberofinstancemembers;
+    for (uint32_t i = 0; i < numberofstaticmembers; ++i)
     {
         if (iscollectable(&lco->staticmembers[i]))
             enqueueobj(ctx, gcvalue(&lco->staticmembers[i]));
     }
 
-    // Traverse the class object's own metatable, then the one handed to its instances
-    enqueueobj(ctx, obj2gco(lco->metatable));
-
     if (lco->instancemetatable)
         enqueueobj(ctx, obj2gco(lco->instancemetatable));
 }
 
+// Mirrors traverseobject in lgc.cpp
 static void traverseobject(ReachableContext* ctx, LuauObject* inst)
 {
-    // Traverse the class this is an instance of
     enqueueobj(ctx, obj2gco(inst->lclass));
 
-    // Traverse instance members. The instance owns this array and its count,
-    // so use those rather than reaching through the class - same as
-    // `traverseobject` in lgc.cpp and `luaR_freeobject`.
     for (uint32_t i = 0; i < inst->numberofmembers; ++i)
     {
         if (iscollectable(&inst->members[i]))

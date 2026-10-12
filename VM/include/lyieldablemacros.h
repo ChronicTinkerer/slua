@@ -108,7 +108,7 @@ using Luau::YieldGuard;
         {                                                                           \
             if ((L)->status == LUA_YIELD || (L)->status == LUA_BREAK)               \
             {                                                                       \
-                _yieldable_slots.flushForYield();                                   \
+                _yieldable_slots.flushForYield(true);                               \
                 return _yieldable_on_yield();                                       \
             }                                                                       \
             return _yieldable_on_error();                                           \
@@ -127,7 +127,7 @@ using Luau::YieldGuard;
         {                                                                           \
             if ((L)->status == LUA_YIELD || (L)->status == LUA_BREAK)               \
             {                                                                       \
-                _yieldable_slots.flushForYield();                                   \
+                _yieldable_slots.flushForYield(false);                              \
                 return _yieldable_on_yield();                                       \
             }                                                                       \
             return _yieldable_on_error();                                           \

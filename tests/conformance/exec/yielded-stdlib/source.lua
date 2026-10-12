@@ -98,6 +98,10 @@ LLTimers:every(0.1, function()
         end)
         results.decode = t[1] == 1 and t[2] == 2 and t[3] == 3
     end)
+    park(function()
+        arm_stdlib_yield()
+        results.split = string.split(hay, needle)
+    end)
     -- An iterator held between iterations has no frame, only upvalues
     held = string.gmatch("aa bb cc", "%w+")
     results.held = #held()
@@ -118,6 +122,7 @@ function LLEvents.moving_start()
         and results.sort == true
         and results.encode == "[10,20,30]"
         and results.decode == true
+        and #results.split == 2 and #results.split[1] == 9400 and results.split[2] == ""
         and results.held == 2 and #held() == 2 and #held() == 2 and held() == nil
     print(if ok then "yieldables ok" else "yieldables bad")
 end

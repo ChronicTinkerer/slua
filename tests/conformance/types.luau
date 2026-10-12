@@ -7,6 +7,7 @@ local ignore =
 	"_G.limitedstack",
 	"_G.RTTI",
 	"_G.collectgarbage",
+	"_G.loadstring",
 	-- Ares: Should _actually_ only be in tests soonish.
 	"_G.ares",
 	"_G.dangerouslyexecuterequiredmodule",

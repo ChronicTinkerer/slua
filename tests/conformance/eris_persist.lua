@@ -289,6 +289,37 @@ coroutine.resume(xprotthr)
 rootobj.testxprotthr = xprotthr
 
 -------------------------------------------------------------------------------
+-- Same again through the slow path. The compiler only emits LOP_FASTPCALL when
+-- the callee resolves to the pcall/xpcall import, so a local alias forces the
+-- builtin C call and its handler frame regardless of the fastpcall flags.
+
+local slowpcall = pcall
+local slowxpcall = xpcall
+
+local function slowprotthreadfunc()
+  local res, err = slowpcall(protf, "test")
+  return err
+end
+
+local slowprotthr = coroutine.create(slowprotthreadfunc)
+coroutine.resume(slowprotthr)
+
+rootobj.testslowprotthr = slowprotthr
+
+local function slowxprotthreadfunc()
+  local function handler(msg)
+    return "handler:" .. msg
+  end
+  local res, err = slowxpcall(protf, handler, "test")
+  return err
+end
+
+local slowxprotthr = coroutine.create(slowxprotthreadfunc)
+coroutine.resume(slowxprotthr)
+
+rootobj.testslowxprotthr = slowxprotthr
+
+-------------------------------------------------------------------------------
 -- Yield across xpcall, then exhaust the C stack once resumed. The handler runs
 -- from resume_handle() here, and must see the same spent C call budget it would
 -- have on the non-yielded path. Resuming a fresh coroutine probes that budget.

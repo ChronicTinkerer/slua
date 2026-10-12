@@ -227,13 +227,30 @@ struct FValueVersionSetter
     static_assert((version) != 0, "LUAU_FLAGVERSION version cannot be 0"); \
     static Luau::FValueVersionSetter flag##_VersionSetter(#flag, version);
 
-// ServerLua: upstream FFlags SL's semantics depend on. Set by name so this needs
+// ServerLua: upstream FFlags SL runs with. Set by name so this needs
 // no link dependency on the modules that define them.
 #define SLUA_REQUIRED_FFLAGS(X) \
     X("LuauIntegerType2") \
     X("LuauIntegerLibrary") \
-    X("LuauYieldIter2") \
-    X("LuauXpcallFixMessageYieldPath")
+    X("LuauIntegerFastcalls") \
+    X("LuauIntegerBufferFastcalls") \
+    X("LuauTableArrayAdjustCheck") \
+    X("LuauTableArrayShrinkOrder") \
+    X("LuauTableRobustOom") \
+    X("LuauTableMoveTimeoutFix") \
+    X("LuauSplitTableLookups") \
+    X("LuauCallLuauTm") \
+    X("LuauSandboxFreezesVectorMetatable") \
+    X("FixMathNoisePrecision") \
+    X("LuauLoadRemapOptionalUserdata") \
+    X("LuauEnumMoreEdges") \
+    X("LuauEasyStateInit") \
+    X("LuauNewPointerEncode") \
+    X("LuauBackedgeHeapCheck") \
+    X("LuauFastpcall") \
+    X("LuauPcallOptimize") \
+    X("LuauFastpcallInterrupt") \
+    X("LuauPcallErrorContinuationReentry")
 
 namespace Luau
 {
