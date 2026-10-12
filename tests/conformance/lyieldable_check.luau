@@ -12,7 +12,8 @@ local function consume(f, ...)
     assert(ok, result)
     while coroutine.status(co) ~= "dead" do
         yields += 1
-        ok, result = coroutine.resume(co)
+        -- Yieldables have to drop values passed to resume
+        ok, result = coroutine.resume(co, "junk", "junk")
         assert(ok, result)
     end
     assert(yields == get_check_count(),

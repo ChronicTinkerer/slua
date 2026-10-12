@@ -406,6 +406,9 @@ static inline void charge_class_scan(int& yield_budget, const char* p, const cha
 // Short enough we don't have to give it any special consideration for "cost"
 static constexpr size_t SHORT_PATTERN = 512;
 
+// Max memcmp work a literal search may do without yield checks
+static constexpr size_t MAX_PLAIN_WORK = 1 << 20;
+
 static_assert(MAXSSIZE <= INT32_MAX, "MAXSSIZE exceeds int32_t range; pattern matcher offsets would overflow");
 
 // Truncate ptrdiff_t to int32_t for the wire format.
@@ -951,7 +954,6 @@ static int str_find_match_body(lua_State* L, bool is_init, uint8_t abi_version, 
         // lmemfind has no yield check, so it is gated on the work it can do:
         // a memcmp of up to lp bytes at each remaining position. Past that,
         // a literal search takes the yieldable plain loop below.
-        constexpr size_t MAX_PLAIN_WORK = 1 << 20;
         if (literal && lp * (ls - init + 1) <= MAX_PLAIN_WORK)
         {
             const char* s2 = lmemfind(s + init - 1, ls - init + 1, p, lp);
@@ -1452,6 +1454,165 @@ DEFINE_YIELDABLE_EXTERN(yieldable_str_gsub, 0)
 
     lua_pushinteger(L, n);
     return 2;
+}
+
+// }======================================================
+
+/*
+** {======================================================
+** YIELDABLE SPLIT
+** =======================================================
+*/
+
+// lstrlib.cpp's DFFlag::LuauOptimizeStringSplit algorithm
+static int split_unyieldable(lua_State* L, const char* s, size_t ls, const char* sep, size_t lp)
+{
+    const char* end = s + ls;
+    const char* span = s;
+    int count = 0;
+
+    if (lp == 0)
+    {
+        lua_createtable(L, int(ls), 0);
+
+        for (const char* iter = s; iter < end; iter++)
+        {
+            lua_pushlstring(L, iter, 1);
+            lua_rawseti(L, -2, ++count);
+        }
+
+        return 1;
+    }
+    else if (lp == 1)
+    {
+        int pieces = 1;
+        for (const char* iter = s; (iter = (const char*)memchr(iter, sep[0], end - iter)) != NULL; iter++)
+            pieces++;
+
+        lua_createtable(L, pieces, 0);
+
+        for (const char* found; (found = (const char*)memchr(span, sep[0], end - span)) != NULL; span = found + 1)
+        {
+            lua_pushlstring(L, span, found - span);
+            lua_rawseti(L, -2, ++count);
+        }
+    }
+    else
+    {
+        lua_createtable(L, 0, 0);
+
+        if (lp <= ls)
+        {
+            const char* last = end - lp;
+
+            for (const char* iter = s; iter <= last;)
+            {
+                if (iter[0] == sep[0] && iter[lp - 1] == sep[lp - 1] && memcmp(iter, sep, lp) == 0)
+                {
+                    lua_pushlstring(L, span, iter - span);
+                    lua_rawseti(L, -2, ++count);
+
+                    span = iter + lp;
+                    iter = span;
+                }
+                else
+                {
+                    iter++;
+                }
+            }
+        }
+    }
+
+    lua_pushlstring(L, span, end - span);
+    lua_rawseti(L, -2, ++count);
+    return 1;
+}
+
+DEFINE_YIELDABLE_EXTERN(yieldable_str_split, 0)
+{
+    YIELDABLE_RETURNS_DEFAULT;
+    enum Arg
+    {
+        ARG_SOURCE   = 2,
+        ARG_SEP      = 3,
+        STACK_RESULT = 4,
+    };
+    enum class Phase : uint8_t
+    {
+        DEFAULT = 0,
+        SCAN_YIELD = 1,
+    };
+
+    // Pre-SlotManager arg positions: source=1, sep=2. Separators of 0 or 1
+    // chars are a linear memchr, longer ones are gated like plain find.
+    if (is_init)
+    {
+        size_t ls, lp;
+        const char* s = luaL_checklstring(L, 1, &ls);
+        const char* sep = luaL_optlstring(L, 2, ",", &lp);
+        if (lp <= 1 || lp > ls || lp * (ls - lp + 1) <= MAX_PLAIN_WORK)
+            return split_unyieldable(L, s, ls, sep, lp);
+    }
+
+    SlotManager slots(L, is_init, abi_version);
+    DEFINE_SLOT(Phase, phase, Phase::DEFAULT);
+    DEFINE_SLOT(int32_t, scan_off, 0);
+    DEFINE_SLOT(int32_t, span_off, 0);
+    DEFINE_SLOT(int32_t, count, 0);
+    slots.finalize();
+
+    if (is_init)
+    {
+        lua_settop(L, ARG_SEP);
+        lua_createtable(L, 0, 0);
+    }
+    else if (lua_type(L, ARG_SOURCE) != LUA_TSTRING || lua_type(L, ARG_SEP) != LUA_TSTRING || !lua_istable(L, STACK_RESULT))
+    {
+        slots.corrupt();
+    }
+
+    size_t ls, lp;
+    const char* s = lua_tolstring(L, ARG_SOURCE, &ls);
+    const char* sep = lua_tolstring(L, ARG_SEP, &lp);
+    const char* found = nullptr;
+    int yield_budget = YIELD_BATCH_SIZE;
+
+    YIELD_DISPATCH_BEGIN(phase, slots);
+    YIELD_DISPATCH(SCAN_YIELD);
+    YIELD_DISPATCH_END();
+
+    // Same search as find's plain loop, but continuing past each match
+    while ((size_t)scan_off + lp <= ls)
+    {
+        found = (const char*)memchr(s + scan_off, sep[0], ls - lp - scan_off + 1);
+        if (!found)
+            break;
+
+        if (memcmp(found + 1, sep + 1, lp - 1) == 0)
+        {
+            lua_pushlstring(L, s + span_off, found - (s + span_off));
+            lua_rawseti(L, STACK_RESULT, ++count);
+
+            span_off = scan_off = (int32_t)(found - s + lp);
+        }
+        else
+        {
+            scan_off = (int32_t)(found - s + 1);
+        }
+
+        if (lp > SHORT_PATTERN || --yield_budget <= 0)
+        {
+            YIELD_CHECK(L, SCAN_YIELD, LUA_INTERRUPT_STDLIB);
+            yield_budget = YIELD_BATCH_SIZE;
+            // Re-read after potential yield (pointers may have moved)
+            s = lua_tolstring(L, ARG_SOURCE, &ls);
+            sep = lua_tolstring(L, ARG_SEP, &lp);
+        }
+    }
+
+    lua_pushlstring(L, s + span_off, ls - span_off);
+    lua_rawseti(L, STACK_RESULT, ++count);
+    return 1;
 }
 
 // }======================================================

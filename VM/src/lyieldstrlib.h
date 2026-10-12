@@ -1,6 +1,6 @@
 // ServerLua: Yieldable pattern-matching functions for the string library.
 //
-// These replace the base (non-yieldable) find/match/gmatch/gsub in
+// These replace the base (non-yieldable) find/match/gmatch/gsub/split in
 // luaopen_string via lua_pushcclosurek.  The base implementations remain
 // in lstrlib.cpp and can be registered on a table for fuzz-testing via
 // luaopen_string_base().
@@ -18,3 +18,6 @@ LUAI_FUNC int yieldable_gmatch(lua_State* L);
 
 LUAI_FUNC int yieldable_str_gsub(lua_State* L);
 LUAI_FUNC int yieldable_str_gsub_k(lua_State* L, int status);
+
+LUAI_FUNC int yieldable_str_split(lua_State* L);
+LUAI_FUNC int yieldable_str_split_k(lua_State* L, int status);

@@ -1887,7 +1887,7 @@ int luaopen_string(lua_State* L)
 {
     luaL_register(L, LUA_STRLIBNAME, strlib);
 
-    // ServerLua: Overwrite pattern-matching functions with yieldable versions.
+    // ServerLua: Overwrite pattern-matching functions and split with yieldable versions.
     lua_pushcclosurek(L, yieldable_str_find, "find", 0, yieldable_str_find_k);
     lua_setfield(L, -2, "find");
 
@@ -1899,6 +1899,9 @@ int luaopen_string(lua_State* L)
 
     lua_pushcclosurek(L, yieldable_str_gsub, "gsub", 0, yieldable_str_gsub_k);
     lua_setfield(L, -2, "gsub");
+
+    lua_pushcclosurek(L, yieldable_str_split, "split", 0, yieldable_str_split_k);
+    lua_setfield(L, -2, "split");
 
     createmetatable(L);
 

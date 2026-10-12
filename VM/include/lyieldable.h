@@ -28,8 +28,9 @@ static_assert(sizeof(bool) == 1, "DEFINE_SLOT(bool) requires sizeof(bool) == 1")
 namespace Luau
 {
 
-// Buffer layout: [u8 abi version][u16 region length][slots...][u8 innermost],
+// Buffer layout: [u8 abi version][u16 region length][u16 stack top][slots...][u8 innermost],
 // then each child region as [u16 region length][slots...][u8 innermost].
+// The stack top is frame-relative, 0 when there's nothing to restore on resume.
 inline constexpr size_t kYieldStateHeader = sizeof(uint8_t) + sizeof(uint16_t);
 
 // Forward declaration — slot destructors access SlotManager members.
@@ -136,7 +137,10 @@ public:
 
     // Creates a Lua buffer at position 1 and sets yielding=true.
     // Slot destructors then write into bufferData on stack unwind.
-    void flushForYield();
+    // own_frame: this frame yielded itself (YIELD_CHECK), so record its stack
+    // top for resume to restore. A YIELD_CALL callee's results land on the
+    // frame instead, so there's nothing to restore.
+    void flushForYield(bool own_frame);
 
     template<typename T>
     PrimitiveSlot<T> allocSlot(T* storage);
