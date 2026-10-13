@@ -384,14 +384,15 @@ void luaG_pusherror(lua_State* L, const char* error)
     pusherror(L, error);
 }
 
-// ServerLua: Throw uncatchable termination error
+// ServerLua: Throw uncatchable termination error. The memory limit can't be
+// allowed to refuse the stack room or the message, or the kill degrades into
+// a catchable error. The engine's own message is pinned, so it never allocates.
 l_noret lua_killerror(lua_State* L, const char* msg)
 {
+    BeforeAllocateHider hider{L->global};
+
     lua_rawcheckstack(L, 1);
-
-    [[maybe_unused]] MemcatGuard guard(L, 0);
-
-    pusherror(L, msg);
+    lua_pushstring(L, msg);
     luaD_throw(L, LUA_ERRKILL);
 }
 

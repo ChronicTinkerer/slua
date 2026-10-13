@@ -347,6 +347,15 @@ struct MemcatGuard
 
 #define LUAU_MEMCAT_GUARD(memcat) [[maybe_unused]] MemcatGuard _memcatGuard{L, memcat};
 
+// ServerLua: Withdraws the memory limit hook for the enclosing scope
+struct BeforeAllocateHider
+{
+    global_State* g;
+    int (*hook)(lua_State* L, size_t osize, size_t nsize);
+    explicit BeforeAllocateHider(global_State* g_) : g(g_), hook(g_->cb.beforeallocate) { g->cb.beforeallocate = nullptr; }
+    ~BeforeAllocateHider() { g->cb.beforeallocate = hook; }
+};
+
 /*
 ** Union of all collectible objects
 */

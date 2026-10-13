@@ -1114,6 +1114,80 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor mandatory yield kill")
         // The script never got to observe the kill
         CHECK(ts.host.printed.empty());
     }
+
+    SUBCASE("entering a metamethod right after the caught error is not a kill")
+    {
+        // Back in yieldable code after the catch, but no call or back-edge
+        // before the next metamethod entry. That interrupt can't break, but
+        // it's not inside anything unyieldable either.
+        TestScript ts(R"(
+            local mt = {}
+            mt.__index = function(t, k)
+                if k == "x" then
+                    while true do end
+                end
+                return 2
+            end
+            local obj = setmetatable({}, mt)
+            local ok, v = pcall(function()
+                pcall(function() return obj.x end)
+                return obj.y
+            end)
+            print(`{ok}:{v}`)
+        )");
+        ts.loadDefaultState();
+
+        // Paced like the recovery subcase above, but with a quanta that isn't a
+        // multiple of the step so the elapsed comparison can't land exactly on it
+        ts.host.clock_step = 0.001;
+        resumeToCompletion(ts.exec, 0.0025);
+        CHECK(ts.exec.getFaultKind() == FaultKind::None);
+        REQUIRE(ts.host.printed.size() == 1);
+        // A failed REQUIRE doesn't unwind without exceptions
+        if (ts.host.printed.size() == 1)
+        {
+            CHECK(ts.host.printed[0].find("false:") == 0);
+            CHECK(ts.host.printed[0].find("Failed to perform mandatory yield") != std::string::npos);
+        }
+    }
+
+    SUBCASE("re-entering the metamethod in a loop still yields every window")
+    {
+        // Coming back around needs a call or a back-edge, each a preemption
+        // point, so this can't run unyielded.
+        TestScript ts(R"(
+            local mt = {}
+            mt.__index = function(t, k)
+                while true do end
+            end
+            local obj = setmetatable({}, mt)
+            caught = 0
+            while true do
+                pcall(function() return obj.x end)
+                caught += 1
+            end
+        )");
+        ts.loadDefaultState();
+        Script& exec = ts.exec;
+
+        ts.host.clock_step = 0.001;
+        // The first window's baseline heap walk reads the clock for its
+        // exclusion bookkeeping, which preempts it early. Let it pass.
+        resume(exec, 0.0025, HandlerRunStatus::Preempted);
+
+        // Each window reaches the metamethod, raises the catchable error
+        // once, and breaks at the loop's back-edge with a punishment
+        for (int window = 0; window < 5; ++window)
+        {
+            exec.setSleep(0.0f);
+            RunResult result = resumeRaw(exec, 0.0025);
+            CAPTURE_RUN_RESULT(exec, result);
+            REQUIRE(result.status == HandlerRunStatus::Preempted);
+            CHECK(exec.getSleep() > 0.0f);
+        }
+        CHECK(exec.getFaultKind() == FaultKind::None);
+        CHECK(readIntGlobal(exec, "caught") == 5);
+    }
 }
 
 TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor engine pauses are not charged")
@@ -2596,6 +2670,8 @@ struct KillingTestHost : TestProvisioner
         TestProvisioner::populate_environment(environment, L);
         lua_pushcfunction(L, host_kill, "host_kill");
         lua_setglobal(L, "host_kill");
+        lua_pushcfunction(L, kill_at_full_stack, "kill_at_full_stack");
+        lua_setglobal(L, "kill_at_full_stack");
     }
 
     // This mimics an `ll.*()` function in indra that sets a fault manually.
@@ -2608,7 +2684,34 @@ struct KillingTestHost : TestProvisioner
             lua_killerror(L, executor->getFaultString().c_str());
         return 0;
     }
+
+    // The engine's own kill from tryYield(), but with the thread's stack parked
+    // one slot under its growth threshold so the kill's stack check has to
+    // reallocate it.
+    static int kill_at_full_stack(lua_State* L)
+    {
+        Script* executor = Script::fromLuaState(L);
+        REQUIRE(executor != nullptr);
+        for (StkId slot = L->top; slot < L->stack_last - 1; ++slot)
+            setnilvalue(slot);
+        L->top = L->stack_last - 1;
+        L->ci->top = L->top;
+        executor->setFault(FaultKind::Timeout, "exceeded time limit");
+        lua_killerror(L, "Failed to perform mandatory yield");
+        return 0;
+    }
 };
+
+// Reachable fill with no table resizes along the way, so the slack left under
+// the limit when it fails is smaller than one link
+static const char* const kFillToLimit = R"(
+    hoard = nil
+    pcall(function()
+        while true do
+            hoard = { hoard, buffer.create(8) }
+        end
+    end)
+)";
 
 TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor host kill aborts the handler")
 {
@@ -2627,6 +2730,80 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor host kill aborts the handler")
     CHECK_FALSE(script->isHandlerActive());
     // The kill preempted everything after the host_kill() call
     CHECK(host.printed.empty());
+}
+
+// A fast pcall catches through lua_resume's error-handler continuation, so
+// everything after the catch runs under resume_finish(). A kill from there has
+// to come back as LUA_ERRKILL like any other.
+TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor kill after a fast pcall caught an error")
+{
+    TestAsset asset = compileTestAsset(R"(
+        pcall(error, "boom")
+        host_kill()
+        print("still alive")
+    )");
+    KillingTestHost host;
+    std::shared_ptr<Script> script = host.provisionScript(asset, makeScriptConfig());
+    REQUIRE(script != nullptr);
+    REQUIRE(script->loadDefaultState());
+
+    resume(*script, 1.0, HandlerRunStatus::Fault);
+    CHECK(script->getFaultKind() == FaultKind::Runtime);
+    CHECK(script->getFaultString() == "killed by host");
+    CHECK_FALSE(script->isHandlerActive());
+    CHECK(host.printed.empty());
+}
+
+// A kill must land whatever the memory limiter thinks: it's the last resort
+// against an unyieldable loop, and the script's pcall sits right there to
+// swallow anything catchable the kill degrades into. The fault is set before
+// the kill the way tryYield() does it, so the host reports Fault either way;
+// what the kill decides is whether the script gets to run on first.
+TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor kill lands when its stack check is refused")
+{
+    TestAsset asset = compileTestAsset((std::string(kFillToLimit) + R"(
+        pcall(kill_at_full_stack)
+        print("survived")
+    )").c_str());
+    KillingTestHost host;
+    std::shared_ptr<Script> script = host.provisionScript(asset, makeScriptConfig());
+    REQUIRE(script != nullptr);
+    REQUIRE(script->loadDefaultState());
+
+    resume(*script, 1.0, HandlerRunStatus::Fault);
+    CHECK(script->getFaultKind() == FaultKind::Timeout);
+    CHECK_FALSE(script->isHandlerActive());
+    CHECK(host.printed.empty());
+}
+
+// Reporting a fault happens after lua_resume() has handed control back, so it
+// can't allocate on the script's heap: a number error object at the limit
+// would otherwise throw straight through the Executor API into the host.
+TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor non-string error object at the memory limit")
+{
+    TestScript ts((std::string(R"(
+        -- Presized so the fine fill below never resizes it
+        fine = table.create(512)
+    )") + kFillToLimit + R"(
+        -- Fresh short strings until one no longer fits, leaving less slack than
+        -- the error object's string form needs. The closure stays reachable so
+        -- its death can't hand that slack back.
+        fine_fill = function()
+            for i = 1, 512 do
+                fine[i] = tostring(i + 100000)
+            end
+        end
+        pcall(fine_fill)
+        -- Level 0, so error() doesn't stringify it with a position prefix
+        error(1 / 3, 0)
+    )").c_str());
+    ts.loadDefaultState();
+    Script& exec = ts.exec;
+
+    resume(exec, 1.0, HandlerRunStatus::Fault);
+    CHECK(exec.getFaultKind() == FaultKind::Runtime);
+    CHECK(exec.getExtendedFaultString().find("number") != std::string::npos);
+    CHECK_FALSE(exec.isHandlerActive());
 }
 
 TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor does not autocall a state_entry global")

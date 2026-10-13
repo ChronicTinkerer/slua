@@ -12,6 +12,10 @@
 
 #define LUA_MEMERRMSG "not enough memory"
 #define LUA_ERRERRMSG "error in error handling"
+// ServerLua: pinned like the two above, so raising them never allocates
+#define LUA_MANDATORYYIELDMSG "Failed to perform mandatory yield"
+#define LUA_CSTACKOVERFLOWMSG "C stack overflow"
+#define LUA_NONSUSPENDEDMSG "cannot resume non-suspended coroutine"
 // ServerLua: raised when the host won't let a script use a thread
 #define LUA_THREADREFUSEDMSG "coroutine is not accessible"
 

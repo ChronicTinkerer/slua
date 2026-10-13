@@ -22,6 +22,9 @@
 
 LUAU_FASTFLAGVARIABLE(SLuaEagerWeakClear)
 
+// Nothing below knows about heap-allocated vectors
+static_assert(LUA_VECTOR_DOUBLE == 0, "the reachability walk has no LUA_TVECTOR case");
+
 static constexpr uint8_t kWeakKey = 1 << 0;
 static constexpr uint8_t kWeakValue = 1 << 1;
 
@@ -39,8 +42,10 @@ typedef struct ReachableContext
     // return.
     std::vector<GCObject*> marked;
     global_State* global = nullptr;
-    // Only the size/clear walk defers weak sides; the baseline free-object
-    // snapshot keeps fully-strong traversal so the exemption set is maximal.
+    // Only a walk rooted at an instance, which is what having a baseline set
+    // means, defers weak sides: anywhere else "unreached" doesn't mean "dead".
+    // The baseline snapshot itself keeps fully-strong traversal so the
+    // exemption set is maximal.
     bool defer_weak = false;
     // Weak tables seen during the walk, with their weakness bits, for the
     // post-walk clear pass.
@@ -578,7 +583,7 @@ void luaC_enumreachableuserallocs(
 {
     ReachableContext ctx;
     ctx.global = L->global;
-    ctx.defer_weak = FFlag::SLuaEagerWeakClear;
+    ctx.defer_weak = FFlag::SLuaEagerWeakClear && free_objects != nullptr;
 
     // Make sure we can hold the free objects, as well as the best-guesss max number
     // of GCObjects we're likely to see during our walk.
@@ -607,7 +612,7 @@ void luaC_enumreachableuserallocs(
         traverseobj(&ctx, current);
     }
 
-    if (FFlag::SLuaEagerWeakClear)
+    if (ctx.defer_weak)
         cleardeadweakrefs(&ctx);
 }
 

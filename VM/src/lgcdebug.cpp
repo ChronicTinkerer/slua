@@ -1311,6 +1311,10 @@ void luaC_enumheap(
 
         enumedge(&ctx, obj2gco(g->mainthread), obj2gco(luaS_newliteral(L, LUA_MEMERRMSG)), "[fixed string]");
         enumedge(&ctx, obj2gco(g->mainthread), obj2gco(luaS_newliteral(L, LUA_ERRERRMSG)), "[fixed string]");
+        // ServerLua: pinned alongside the two above in f_luaopen
+        enumedge(&ctx, obj2gco(g->mainthread), obj2gco(luaS_newliteral(L, LUA_MANDATORYYIELDMSG)), "[fixed string]");
+        enumedge(&ctx, obj2gco(g->mainthread), obj2gco(luaS_newliteral(L, LUA_CSTACKOVERFLOWMSG)), "[fixed string]");
+        enumedge(&ctx, obj2gco(g->mainthread), obj2gco(luaS_newliteral(L, LUA_NONSUSPENDEDMSG)), "[fixed string]");
     }
 
     luaM_visitgco(L, &ctx, enumgco);

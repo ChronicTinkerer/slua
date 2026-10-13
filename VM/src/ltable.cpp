@@ -737,18 +737,7 @@ static void resize(lua_State* L, LuaTable* t, int nasize, int nhsize)
 
         // ServerLua: the allocations below are covered by this charge
         chargeresize(L, t, nasize, nhsize);
-        global_State* g = L->global;
-        struct BeforeAllocateHider
-        {
-            global_State* g;
-            int (*hook)(lua_State* L, size_t osize, size_t nsize);
-
-            ~BeforeAllocateHider()
-            {
-                g->cb.beforeallocate = hook;
-            }
-        } hider{g, g->cb.beforeallocate};
-        g->cb.beforeallocate = nullptr;
+        BeforeAllocateHider hider{L->global};
 
         if (nasize != oldsizearray)
         {

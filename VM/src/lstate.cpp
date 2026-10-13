@@ -86,6 +86,10 @@ static void f_luaopen(lua_State* L, void* ud)
     }
     luaS_fix(luaS_newliteral(L, LUA_MEMERRMSG)); // pin to make sure we can always throw this error
     luaS_fix(luaS_newliteral(L, LUA_ERRERRMSG)); // pin to make sure we can always throw this error
+    // ServerLua: same for the messages raised from unprotected or unyieldable spots
+    luaS_fix(luaS_newliteral(L, LUA_MANDATORYYIELDMSG));
+    luaS_fix(luaS_newliteral(L, LUA_CSTACKOVERFLOWMSG));
+    luaS_fix(luaS_newliteral(L, LUA_NONSUSPENDEDMSG));
     g->GCthreshold = 4 * g->totalbytes;
 }
 

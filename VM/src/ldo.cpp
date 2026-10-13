@@ -728,11 +728,11 @@ static int resume_start(lua_State* L, lua_State* from, int nargs)
     api_check(L, L->top - L->base >= nargs);
 
     if (L->status != LUA_YIELD && L->status != LUA_BREAK && (L->status != 0 || L->ci != L->base_ci))
-        return resume_error(L, "cannot resume non-suspended coroutine", nargs);
+        return resume_error(L, LUA_NONSUSPENDEDMSG, nargs);
 
     L->nCcalls = from ? from->nCcalls : 0;
     if (L->nCcalls >= LUAI_MAXCCALLS)
-        return resume_error(L, "C stack overflow", nargs);
+        return resume_error(L, LUA_CSTACKOVERFLOWMSG, nargs);
 
     // ServerLua: A break here can only propagate if every resumer up to the host can break too
     L->unbreakable = from != nullptr && (from->nCcalls > from->baseCcalls || from->unbreakable);
@@ -767,7 +767,17 @@ static int resume_finish(lua_State* L, int status, int oldnCcalls)
         L->baseCcalls = oldnCcalls;
 
         L->status = cast_byte(status);
-        status = luaD_rawrunprotected(L, resume_handle, ch);
+        try
+        {
+            status = luaD_rawrunprotected(L, resume_handle, ch);
+        }
+        catch (lua_exception& e)
+        {
+            // ServerLua: The handler's continuation runs the rest of the thread, so a
+            // kill in there surfaces here rather than in lua_resume's own catch
+            LUAU_ASSERT(e.getStatus() == LUA_ERRKILL);
+            status = e.getStatus();
+        }
     }
 
     // C call count base was set to an incremented value of C call count in resume, so we decrement here

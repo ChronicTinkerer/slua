@@ -9,6 +9,7 @@
 #include "lualib.h"
 #include "llsl.h"
 
+#include "ldebug.h"
 #include "lgc.h"
 #include "lstate.h"
 
@@ -479,18 +480,25 @@ void Script::setLuaFaultFromStatus(lua_State* L, int status)
         mFaultString = "exceeded time limit";
         mExtendedFaultString = "";
     }
-    else if (status == LUA_ERRMEM || lua_isstring(L, -1))
+    else
     {
-        size_t len;
-        const char* msg;
+        // Nothing here may touch the script's heap: lua_resume() has returned,
+        // so an allocation the limit refuses would throw straight into the host.
+        std::string fault_string;
         if (status == LUA_ERRMEM)
         {
-            msg = "not enough memory";
-            len = strlen(msg);
+            fault_string = LUA_MEMERRMSG;
+        }
+        else if (lua_type(L, -1) == LUA_TSTRING)
+        {
+            size_t len;
+            const char* msg = lua_tolstring(L, -1, &len);
+            fault_string.assign(msg, len);
         }
         else
-            msg = lua_tolstring(L, -1, &len);
-        std::string fault_string{msg, len};
+        {
+            fault_string = std::string("error object is a ") + lua_typename(L, lua_type(L, -1)) + " value";
+        }
 
         if (status == LUA_ERRMEM)
         {
@@ -516,13 +524,7 @@ void Script::setLuaFaultFromStatus(lua_State* L, int status)
             mExtendedFaultString += traceback;
         }
 
-        logInfo(logSource(), "Script error: %s", msg);
-    }
-    else
-    {
-        mFaultKind = FaultKind::Unknown;
-        mFaultString = "Unknown runtime error";
-        mExtendedFaultString = "";
+        logInfo(logSource(), "Script error: %s", fault_string.c_str());
     }
 }
 
@@ -1104,18 +1106,26 @@ void Script::tryYield(lua_State* L, double elapsed, bool mandatory)
             // This will get us out of the host's `runQuanta()` loop
             mYieldDue = true;
 
-            if (!mMandatoryYieldRaised)
+            // Still at yieldable depth, so a normal error is enough to get back to
+            // preemptible code. Only kill once something unyieldable has been entered.
+            // One way here: `pcall(function() return obj.x end); return obj.y` with an
+            // `__index` on `obj`. The error raised entering `__index` for `x` was caught
+            // by the pcall, and nothing breakable ran before `__index` is entered again
+            // for `y`.
+            bool at_yieldable_depth = !L->unbreakable && L->nCcalls == L->baseCcalls + 1;
+
+            if (!mMandatoryYieldRaised || at_yieldable_depth)
             {
                 // We're going to be polite. Throw a typical Lua error to try to
                 // get back to a yieldable place in the script.
                 mMandatoryYieldRaised = true;
-                luaL_errorL(L, "Failed to perform mandatory yield");
+                luaL_errorL(L, LUA_MANDATORYYIELDMSG);
             }
 
             // Here we are again. Okay, time to do an uncatchable killerror.
             // By convention, this renders the script inoperable rather than
             // letting the script run wild. Set the fault, make the kill.
-            std::string extended = "Failed to perform mandatory yield";
+            std::string extended = LUA_MANDATORYYIELDMSG;
             const char* traceback = lua_debugtrace(L);
             if (traceback != nullptr)
             {
@@ -1124,7 +1134,7 @@ void Script::tryYield(lua_State* L, double elapsed, bool mandatory)
             }
             setFault(FaultKind::Timeout, "exceeded time limit", extended.c_str());
 
-            lua_killerror(L, "Failed to perform mandatory yield");
+            lua_killerror(L, LUA_MANDATORYYIELDMSG);
         }
     }
 }
