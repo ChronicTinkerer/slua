@@ -962,6 +962,11 @@ reentry:
 
             VM_CASE(LOP_NEWCLOSURE)
             {
+                // ServerLua: allocating instructions, and fastcalls not known to be trivial, are
+                // interrupt points, checked before any side effect so a break simply re-executes
+                // them. Otherwise a run of them with no call or back-edge is bounded only by
+                // bytecode size, and each one can be made to cost a reachability walk or a copy.
+                VM_INTERRUPT();
                 VM_CASE_INSTRUCTION insn = *pc++;
                 VM_CASE_STKID ra = VM_REG(LUAU_INSN_A(insn));
 
@@ -2685,6 +2690,7 @@ reentry:
 
             VM_CASE(LOP_CONCAT)
             {
+                VM_INTERRUPT(); // ServerLua
                 VM_CASE_INSTRUCTION insn = *pc++;
                 int b = LUAU_INSN_B(insn);
                 int c = LUAU_INSN_C(insn);
@@ -2816,6 +2822,7 @@ reentry:
 
             VM_CASE(LOP_NEWTABLE)
             {
+                VM_INTERRUPT(); // ServerLua
                 VM_CASE_INSTRUCTION insn = *pc++;
                 VM_CASE_STKID ra = VM_REG(LUAU_INSN_A(insn));
                 int b = LUAU_INSN_B(insn);
@@ -2830,6 +2837,7 @@ reentry:
 
             VM_CASE(LOP_DUPTABLE)
             {
+                VM_INTERRUPT(); // ServerLua
                 VM_CASE_INSTRUCTION insn = *pc++;
                 VM_CASE_STKID ra = VM_REG(LUAU_INSN_A(insn));
                 TValue* kv = VM_KV(LUAU_INSN_D(insn));
@@ -3416,6 +3424,9 @@ reentry:
 
             VM_CASE(LOP_FASTCALL)
             {
+                // ServerLua: before advancing pc, so a break re-executes the fastcall
+                if (!luauF_trivial(LUAU_INSN_A(*pc)))
+                    VM_INTERRUPT();
                 VM_CASE_INSTRUCTION insn = *pc++;
                 int bfid = LUAU_INSN_A(insn);
                 int skip = LUAU_INSN_C(insn);
@@ -3438,7 +3449,11 @@ reentry:
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
+                    // ServerLua: the builtin is C code, so anything that asks about yieldability
+                    // from inside it must be told no. Catchers restore the count if it throws.
+                    L->nCcalls++;
                     int n = f(L, ra, ra + 1, nresults, ra + 2, nparams);
+                    L->nCcalls--;
 
                     if (n >= 0)
                     {
@@ -3546,6 +3561,9 @@ reentry:
 
             VM_CASE(LOP_FASTCALL1)
             {
+                // ServerLua: before advancing pc, so a break re-executes the fastcall
+                if (!luauF_trivial(LUAU_INSN_A(*pc)))
+                    VM_INTERRUPT();
                 VM_CASE_INSTRUCTION insn = *pc++;
                 int bfid = LUAU_INSN_A(insn);
                 TValue* arg = VM_REG(LUAU_INSN_B(insn));
@@ -3567,7 +3585,9 @@ reentry:
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
+                    L->nCcalls++; // ServerLua
                     int n = f(L, ra, arg, nresults, NULL, nparams);
+                    L->nCcalls--; // ServerLua
 
                     if (n >= 0)
                     {
@@ -3593,6 +3613,9 @@ reentry:
 
             VM_CASE(LOP_FASTCALL2)
             {
+                // ServerLua: before advancing pc, so a break re-executes the fastcall
+                if (!luauF_trivial(LUAU_INSN_A(*pc)))
+                    VM_INTERRUPT();
                 VM_CASE_INSTRUCTION insn = *pc++;
                 int bfid = LUAU_INSN_A(insn);
                 int skip = LUAU_INSN_C(insn) - 1;
@@ -3617,7 +3640,9 @@ reentry:
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
+                    L->nCcalls++; // ServerLua
                     int n = f(L, ra, arg1, nresults, arg2, nparams);
+                    L->nCcalls--; // ServerLua
 
                     if (n >= 0)
                     {
@@ -3643,6 +3668,9 @@ reentry:
 
             VM_CASE(LOP_FASTCALL2K)
             {
+                // ServerLua: before advancing pc, so a break re-executes the fastcall
+                if (!luauF_trivial(LUAU_INSN_A(*pc)))
+                    VM_INTERRUPT();
                 VM_CASE_INSTRUCTION insn = *pc++;
                 int bfid = LUAU_INSN_A(insn);
                 int skip = LUAU_INSN_C(insn) - 1;
@@ -3667,7 +3695,9 @@ reentry:
                 {
                     VM_PROTECT_PC(); // f may fail due to OOM
 
+                    L->nCcalls++; // ServerLua
                     int n = f(L, ra, arg1, nresults, arg2, nparams);
+                    L->nCcalls--; // ServerLua
 
                     if (n >= 0)
                     {
@@ -3693,6 +3723,9 @@ reentry:
 
             VM_CASE(LOP_FASTCALL3)
             {
+                // ServerLua: before advancing pc, so a break re-executes the fastcall
+                if (!luauF_trivial(LUAU_INSN_A(*pc)))
+                    VM_INTERRUPT();
                 VM_CASE_INSTRUCTION insn = *pc++;
                 int bfid = LUAU_INSN_A(insn);
                 int skip = LUAU_INSN_C(insn) - 1;
@@ -3724,7 +3757,9 @@ reentry:
                     setobj2s(L, top, arg2);
                     setobj2s(L, top + 1, arg3);
 
+                    L->nCcalls++; // ServerLua
                     int n = f(L, ra, arg1, nresults, top, nparams);
+                    L->nCcalls--; // ServerLua
 
                     if (n >= 0)
                     {

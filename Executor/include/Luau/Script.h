@@ -198,6 +198,12 @@ public:
     // Wall time excluded from punishment accounting in the current window
     double getExcludedTime() const { return mExcludedTime; }
 
+    // Billed per allocation so a window's garbage, collected after the window
+    // with the GC parked, isn't free. A fixed rate rather than the measured
+    // catch-up, which the pacer makes vary between identical windows.
+    static constexpr double kAllocationChargeSeconds = 50e-9;
+    double getAllocationCharge() const { return mWindowAllocations * kAllocationChargeSeconds; }
+
 protected:
     // Written whole after kScriptStateFingerprint in every payload this class
     // produces, so a fixed offset says which class a payload belongs to. The
@@ -285,6 +291,8 @@ private:
     double mQuanta = 0.0;
     // Wall time this window spent inside reachability walks.
     double mExcludedTime = 0.0;
+    // Allocations admitted this window, billed through getAllocationCharge()
+    uint32_t mWindowAllocations = 0;
     // When we're supposed to invoke GC next. Held here since we disable GC during a run.
     // TODO: there is probably some threshold of churn after which we want a script to take
     //  a nap. There needs to be some quantifiable cost for abusive garbage creation during

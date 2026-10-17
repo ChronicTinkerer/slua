@@ -525,6 +525,16 @@ inline bool luau_is_preemptible(unsigned int op)
         case LOP_RETURN:
         case LOP_FORNLOOP:
         case LOP_FORGLOOP:
+        // Checked before they do anything, so they re-execute after a break
+        case LOP_NEWCLOSURE:
+        case LOP_NEWTABLE:
+        case LOP_DUPTABLE:
+        case LOP_CONCAT:
+        case LOP_FASTCALL:
+        case LOP_FASTCALL1:
+        case LOP_FASTCALL2:
+        case LOP_FASTCALL2K:
+        case LOP_FASTCALL3:
             return true;
         default:
             return false;

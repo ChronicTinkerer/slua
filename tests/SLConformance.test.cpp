@@ -27,6 +27,7 @@
 #include "../VM/src/ltable.h"
 
 #include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 #include <math.h>
@@ -714,6 +715,86 @@ TEST_CASE("Can interrupt everywhere in simple script")
     });
 }
 
+// Same script, but every interrupt the predicate okays actually breaks and
+// the thread is resumed there. An instruction wrongly marked preemptible shows
+// up as a wrong result rather than as a classifier assert.
+TEST_CASE("Can break everywhere the engine allows")
+{
+    auto state = runConformance("json_encode_sl.lua", nullptr, [](lua_State *L) {
+        lua_pushcfunction(L, lua_silence, "print");
+        lua_setglobal(L, "print");
+        lua_callbacks(L)->interrupt = [](lua_State *L, int gc) {
+            if (gc >= 0)
+                return;
+            if (luaSL_may_interrupt(L) != YieldableStatus::OK)
+                return;
+
+            auto *ud = (SLTestRuntimeState*)L->userdata;
+            // Resuming re-executes the broken instruction, and with it this
+            // check. Let that one through so the script makes progress.
+            const Instruction* pc = L->ci->savedpc;
+            if (pc == ud->last_break_pc)
+            {
+                ud->last_break_pc = nullptr;
+                return;
+            }
+            ud->last_break_pc = pc;
+            ud->break_num++;
+            lua_break(L);
+        };
+    });
+    CHECK(((SLTestRuntimeState*)state->userdata)->break_num > 100);
+}
+
+// Breaks wherever the predicate allows and records the opcode broken at, and
+// the builtin for a fastcall. The script's own assert proves each broken
+// instruction re-executed exactly once.
+TEST_CASE("Straight-line allocations and fastcalls are break points")
+{
+    static std::set<int> broken_at;
+    static std::set<int> broken_builtins;
+    broken_at.clear();
+    broken_builtins.clear();
+
+    runConformance("straightline_interrupts.lua", nullptr, [](lua_State *L) {
+        lua_callbacks(L)->interrupt = [](lua_State *L, int gc) {
+            if (gc >= 0)
+                return;
+            if (luaSL_may_interrupt(L) != YieldableStatus::OK)
+                return;
+
+            auto *ud = (SLTestRuntimeState*)L->userdata;
+            // The resumed instruction checks again. Let it run this time.
+            const Instruction* pc = L->ci->savedpc;
+            if (pc == ud->last_break_pc)
+            {
+                ud->last_break_pc = nullptr;
+                return;
+            }
+            ud->last_break_pc = pc;
+            // savedpc was advanced past the instruction before the check
+            int op = LUAU_INSN_OP(pc[-1]);
+            broken_at.insert(op);
+            if (op == LOP_FASTCALL || op == LOP_FASTCALL1 || op == LOP_FASTCALL2 || op == LOP_FASTCALL2K || op == LOP_FASTCALL3)
+                broken_builtins.insert(LUAU_INSN_A(pc[-1]));
+            lua_break(L);
+        };
+    });
+
+    for (int op : {LOP_NEWTABLE, LOP_DUPTABLE, LOP_CONCAT, LOP_NEWCLOSURE, LOP_FASTCALL, LOP_FASTCALL1, LOP_FASTCALL2, LOP_FASTCALL2K, LOP_FASTCALL3})
+    {
+        CAPTURE(op);
+        CHECK(broken_at.count(op) == 1);
+    }
+    for (int bfid : {LBF_TOSTRING, LBF_STRING_SUB, LBF_STRING_CHAR})
+    {
+        CAPTURE(bfid);
+        CHECK(broken_builtins.count(bfid) == 1);
+    }
+    CHECK(broken_builtins.count(LBF_MATH_ABS) == 0);
+    CHECK(broken_builtins.count(LBF_MATH_MAX) == 0);
+}
+
 static int breakable_count = 0;
 static bool must_break = false;
 
@@ -784,12 +865,14 @@ TEST_CASE("Can break at tail of LOP_CALL")
     // Make sure the function actually ran
     CHECK_EQ(breakable_count, 3);
     // Expected breaks: 3 breakable() calls (each with call + tail = 6),
-    // LLEvents:on call, nothing(m[1]) call, m:foo call, return = 10 total
+    // LLEvents:on call, nothing(m[1]) call, m:foo call, return = 10, plus the
+    // first line's `{}` and `{...}` = 12 total
     // Note: NAMECALL is no longer preemptible - only the following CALL interrupts
-    CHECK_EQ(((SLTestRuntimeState*)state->userdata)->break_num, 10);
-    // Total interrupts: 10 breaks + 6 re-triggers (CALL only, not tail checks)
-    // + 5 non-breaking (setmetatable, 2 NAMECALL __index, m[1] __index, m[2] __newindex) = 21
-    CHECK_EQ(((SLTestRuntimeState*)state->userdata)->interrupt_call_count, 21);
+    CHECK_EQ(((SLTestRuntimeState*)state->userdata)->break_num, 12);
+    // Total interrupts: 12 breaks + 8 re-triggers (CALL and the first line's
+    // two tables, not tail checks) + 5 non-breaking (setmetatable, 2 NAMECALL
+    // __index, m[1] __index, m[2] __newindex) = 25
+    CHECK_EQ(((SLTestRuntimeState*)state->userdata)->interrupt_call_count, 25);
 }
 
 TEST_CASE("String comparisons work with a non-default memcat")

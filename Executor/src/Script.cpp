@@ -220,6 +220,7 @@ bool Script::loadDefaultState()
     mMandatoryYieldRaised = false;
     mMandatoryDeadline = 0.0;
     mExcludedTime = 0.0;
+    mWindowAllocations = 0;
     mSleep = 0.0f;
     mMainFunctionComplete = false;
     clearFault();
@@ -281,6 +282,7 @@ void Script::beginRunWindow(double quanta)
     mMandatoryYieldRaised = false;
     mMandatoryDeadline = 0.0;
     mExcludedTime = 0.0;
+    mWindowAllocations = 0;
     mWindowStart = mQuantaClockProvider();
     mQuanta = quanta;
 
@@ -924,7 +926,9 @@ void Script::interruptHandler(lua_State* L, int gc)
         return;
     }
 
-    double elapsed = execute->mQuantaClockProvider() - execute->mWindowStart;
+    // Allocations are billed as time, so a window that produces garbage
+    // instead of burning the clock still comes up for preemption and punishment.
+    double elapsed = execute->mQuantaClockProvider() - execute->mWindowStart + execute->getAllocationCharge();
     if (elapsed > execute->mQuanta)
     {
         execute->tryYield(L, elapsed);
@@ -1031,6 +1035,7 @@ int Script::memoryLimitCallback(lua_State* L, size_t osize, size_t nsize)
         execute->mMaxPossibleSize = execute->mExactSize = new_size;
     }
 
+    ++execute->mWindowAllocations;
     return 0;
 }
 

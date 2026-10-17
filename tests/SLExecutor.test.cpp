@@ -1020,12 +1020,13 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor mandatory yield kill")
         ts.loadDefaultState();
         Script& exec = ts.exec;
 
-        // The mocked clock jumps a full second per reading, so every interrupt is
-        // already past 3.5x the 1ms punishment floor. Interrupts at yieldable
-        // points just preempt; the script is only killed once execution is inside
-        // the metamethod frame, where a yield can't be injected.
-        ts.host.clock_step = 1.0;
-        resumeToCompletion(exec, 0.0001, HandlerRunStatus::Fault);
+        // Each reading advances 0.4x quanta, so yieldable windows make progress
+        // and then preempt. Inside the metamethod frame no yield can be injected,
+        // so the back-edge checks walk charged time past 3.5x the 1ms punishment
+        // floor and through the grace, and the uncaught mandatory yield ends the
+        // script.
+        ts.host.clock_step = 0.001;
+        resumeToCompletion(exec, 0.0025, HandlerRunStatus::Fault);
         CHECK(exec.getFaultKind() == FaultKind::Timeout);
         CHECK(exec.getFaultString() == "exceeded time limit");
         CHECK(exec.getExtendedFaultString().find("Failed to perform mandatory yield") != std::string::npos);
@@ -1107,8 +1108,10 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor mandatory yield kill")
         )");
         ts.loadDefaultState();
 
-        ts.host.clock_step = 1.0;
-        resumeToCompletion(ts.exec, 0.0001, HandlerRunStatus::Fault);
+        // Paced like the subcase above: yieldable windows progress, and the
+        // inner loop's back-edge checks carry charged time through the grace
+        ts.host.clock_step = 0.001;
+        resumeToCompletion(ts.exec, 0.0025, HandlerRunStatus::Fault);
         CHECK(ts.exec.getFaultKind() == FaultKind::Timeout);
         CHECK(ts.exec.getFaultString() == "exceeded time limit");
         // The script never got to observe the kill
@@ -1171,9 +1174,15 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor mandatory yield kill")
         Script& exec = ts.exec;
 
         ts.host.clock_step = 0.001;
-        // The first window's baseline heap walk reads the clock for its
-        // exclusion bookkeeping, which preempts it early. Let it pass.
-        resume(exec, 0.0025, HandlerRunStatus::Preempted);
+        // The baseline heap walk and the setup's allocations read the clock
+        // too, so how many windows the setup takes isn't fixed. Let them pass
+        // until the loop has caught once.
+        for (int window = 0; window < 10 && readIntGlobal(exec, "caught") != 1; ++window)
+        {
+            exec.setSleep(0.0f);
+            resume(exec, 0.0025, HandlerRunStatus::Preempted);
+        }
+        REQUIRE(readIntGlobal(exec, "caught") == 1);
 
         // Each window reaches the metamethod, raises the catchable error
         // once, and breaks at the loop's back-edge with a punishment
@@ -1186,7 +1195,7 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor mandatory yield kill")
             CHECK(exec.getSleep() > 0.0f);
         }
         CHECK(exec.getFaultKind() == FaultKind::None);
-        CHECK(readIntGlobal(exec, "caught") == 5);
+        CHECK(readIntGlobal(exec, "caught") == 6);
     }
 }
 
@@ -1312,6 +1321,42 @@ TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor mandatory yield grace")
         CHECK(ts.host.printed.empty());
     }
 
+}
+
+// The GC is parked for the window and catches up afterwards, so a window's
+// garbage is billed as time at a fixed rate per allocation.
+TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor allocations are charged against the quanta")
+{
+    // The clock never moves, so only the allocation charge can end a window
+    constexpr double quanta = 0.001;
+    const int over_quanta = int(quanta / Script::kAllocationChargeSeconds) + 1;
+
+    SUBCASE("an allocating loop is preempted")
+    {
+        std::string source = "for i = 1, " + std::to_string(over_quanta) + " do t = {} end\nprint(\"done\")\n";
+        TestScript ts(source.c_str());
+        ts.loadDefaultState();
+
+        ts.host.clock_step = 0.0;
+        resume(ts.exec, quanta, HandlerRunStatus::Preempted);
+        CHECK(ts.host.printed.empty());
+        // A hair over the quanta is nowhere near the 3x punishment floor
+        CHECK(ts.exec.getSleep() == 0.0f);
+
+        resumeToCompletion(ts.exec, quanta);
+        checkCapture(ts.host.printed, {"done"});
+    }
+
+    SUBCASE("the same loop without allocations runs through")
+    {
+        std::string source = "for i = 1, " + std::to_string(over_quanta) + " do t = i end\nprint(\"done\")\n";
+        TestScript ts(source.c_str());
+        ts.loadDefaultState();
+
+        ts.host.clock_step = 0.0;
+        resume(ts.exec, quanta);
+        checkCapture(ts.host.printed, {"done"});
+    }
 }
 
 TEST_CASE_FIXTURE(SLuaFixture, "SLExecutor pending sleep preempts")
