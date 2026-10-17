@@ -89,4 +89,27 @@ reset_interrupt_test()
 local result = string.gsub(test_string, "a", test_callback)
 assert(check_callback_ran(), "string.gsub replacement function should have run")
 
+-- Coercing a numeral hands the whole string to strtod, so a long one is
+-- announced to the handler first. Built at runtime so nothing is folded.
+local long_numeral = string.rep("9", 64)
+local short_numeral = tostring(5)
+
+reset_interrupt_test()
+_ = long_numeral + 0
+assert(check_interrupt_ran(), "arithmetic on a long numeral should be announced")
+
+-- Zero iterations: 1e64 + 1 == 1e64, so a loop up to it never ends
+reset_interrupt_test()
+for _ = long_numeral, 0 do end
+assert(check_interrupt_ran(), "a long numeral as a loop bound should be announced")
+
+-- Through luaL_checknumber, once the fastcall has declined the string
+reset_interrupt_test()
+_ = math.floor(long_numeral)
+assert(check_interrupt_ran(), "a long numeral argument to a C function should be announced")
+
+reset_interrupt_test()
+_ = short_numeral + 0
+assert(not check_interrupt_ran(), "a short numeral is not worth a check")
+
 return "OK"

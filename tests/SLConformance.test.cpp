@@ -1220,6 +1220,13 @@ static int check_callback_ran(lua_State* L)
     return 1;
 }
 
+static int check_interrupt_ran(lua_State* L)
+{
+    RuntimeState* state = (RuntimeState*)L->userdata;
+    lua_pushboolean(L, !state->interrupt_should_clear);
+    return 1;
+}
+
 static int test_callback(lua_State* L)
 {
     RuntimeState* state = (RuntimeState*)L->userdata;
@@ -1260,6 +1267,7 @@ TEST_CASE("Metamethods and library callbacks receive interrupt checks")
             case LUA_INTERRUPT_METAMETHOD:
             case LUA_INTERRUPT_LLLIB:
             case LUA_INTERRUPT_STDLIB:
+            case LUA_INTERRUPT_COERCION:
                 break;
             default:
                 return;
@@ -1275,6 +1283,9 @@ TEST_CASE("Metamethods and library callbacks receive interrupt checks")
 
         lua_pushcfunction(L, check_callback_ran, "check_callback_ran");
         lua_setglobal(L, "check_callback_ran");
+
+        lua_pushcfunction(L, check_interrupt_ran, "check_interrupt_ran");
+        lua_setglobal(L, "check_interrupt_ran");
 
         lua_pushcfunction(L, test_callback, "test_callback");
         lua_setglobal(L, "test_callback");

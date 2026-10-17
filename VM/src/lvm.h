@@ -7,7 +7,8 @@
 
 #define tostring(L, o) ((ttype(o) == LUA_TSTRING) || (luaV_tostring(L, o)))
 
-#define tonumber(o, n) (ttype(o) == LUA_TNUMBER || (((o) = luaV_tonumber(o, n)) != NULL))
+// ServerLua: takes L so a long numeral can be announced before coercion
+#define tonumber(L, o, n) (ttype(o) == LUA_TNUMBER || (((o) = luaV_tonumber(L, o, n)) != NULL))
 
 #define equalobj(L, o1, o2) (ttype(o1) == ttype(o2) && luaV_equalval(L, o1, o2))
 
@@ -20,7 +21,7 @@ template<TMS op>
 void luaV_doarithimpl(lua_State* L, StkId ra, const TValue* rb, const TValue* rc);
 
 LUAI_FUNC void luaV_dolen(lua_State* L, StkId ra, const TValue* rb);
-LUAI_FUNC const TValue* luaV_tonumber(const TValue* obj, TValue* n);
+LUAI_FUNC const TValue* luaV_tonumber(lua_State* L, const TValue* obj, TValue* n); // ServerLua
 LUAI_FUNC const LUA_VECTOR_TYPE* luaV_tovector(const TValue* obj);
 LUAI_FUNC int luaV_tostring(lua_State* L, StkId obj);
 LUAI_FUNC void luaV_gettable(lua_State* L, const TValue* t, TValue* key, StkId val);

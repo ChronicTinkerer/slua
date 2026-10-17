@@ -176,6 +176,7 @@ enum lua_InterruptReason
     LUA_INTERRUPT_STDLIB = -4,
     LUA_INTERRUPT_METAMETHOD = -5,
     LUA_INTERRUPT_CALLTAIL = -6,
+    LUA_INTERRUPT_COERCION = -7,
 };
 // clang-format on
 

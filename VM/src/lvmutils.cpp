@@ -22,11 +22,16 @@ LUAU_FASTFLAG(DebugLuauUserDefinedClassesRuntime)
 LUAU_FASTFLAG(LuauPromoteProto)
 LUAU_FASTFLAGVARIABLE(LuauCallLuauTm)
 
-const TValue* luaV_tonumber(const TValue* obj, TValue* n)
+// ServerLua: we add an L parameter for an interrupt check before coercing large strings
+#define LUAI_LONGNUMERAL 32
+
+const TValue* luaV_tonumber(lua_State* L, const TValue* obj, TValue* n)
 {
     double num;
     if (ttisnumber(obj))
         return obj;
+    if (ttisstring(obj) && L->isactive && tsvalue(obj)->len >= LUAI_LONGNUMERAL) // ServerLua
+        luau_callinterrupthandler(L, LUA_INTERRUPT_COERCION);
     if (ttisstring(obj) && luaO_str2d(svalue(obj), &num))
     {
         setnvalue(n, num);
@@ -665,7 +670,7 @@ static const TValue* luaV_tonumber_lsl(lua_State* L, const TValue* obj, TValue* 
         setnvalue(n, (double)intvalue(obj));
         return n;
     }
-    return luaV_tonumber(obj, n);
+    return luaV_tonumber(L, obj, n);
 }
 
 template<TMS op>
@@ -882,11 +887,11 @@ void luaV_dolen(lua_State* L, StkId ra, const TValue* rb)
 
 LUAU_NOINLINE void luaV_prepareFORN(lua_State* L, StkId plimit, StkId pstep, StkId pinit)
 {
-    if (!ttisnumber(pinit) && !luaV_tonumber(pinit, pinit))
+    if (!ttisnumber(pinit) && !luaV_tonumber(L, pinit, pinit))
         luaG_forerror(L, pinit, "initial value");
-    if (!ttisnumber(plimit) && !luaV_tonumber(plimit, plimit))
+    if (!ttisnumber(plimit) && !luaV_tonumber(L, plimit, plimit))
         luaG_forerror(L, plimit, "limit");
-    if (!ttisnumber(pstep) && !luaV_tonumber(pstep, pstep))
+    if (!ttisnumber(pstep) && !luaV_tonumber(L, pstep, pstep))
         luaG_forerror(L, pstep, "step");
 }
 

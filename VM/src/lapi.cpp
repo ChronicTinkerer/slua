@@ -387,7 +387,7 @@ int lua_isnumber(lua_State* L, int idx)
 {
     TValue n;
     const TValue* o = index2addr(L, idx);
-    return tonumber(o, &n);
+    return tonumber(L, o, &n);
 }
 
 int lua_isstring(lua_State* L, int idx)
@@ -451,7 +451,7 @@ double lua_tonumberx(lua_State* L, int idx, int* isnum)
             *isnum = 1;
         return (double)intvalue(o);
     }
-    if (tonumber(o, &n))
+    if (tonumber(L, o, &n))
     {
         if (isnum)
             *isnum = 1;
@@ -476,7 +476,7 @@ int lua_tointegerx(lua_State* L, int idx, int* isnum)
             *isnum = 1;
         return intvalue(o);
     }
-    else if (tonumber(o, &n))
+    else if (tonumber(L, o, &n))
     {
         // ServerLua: Use safe conversion for cross-platform consistency
         double num = nvalue(o);
@@ -504,7 +504,7 @@ unsigned lua_tounsignedx(lua_State* L, int idx, int* isnum)
             *isnum = 1;
         return (unsigned)intvalue(o);
     }
-    else if (tonumber(o, &n))
+    else if (tonumber(L, o, &n))
     {
         unsigned res;
         double num = nvalue(o);
