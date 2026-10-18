@@ -77,4 +77,12 @@ assert(ll.GetListEntryType({"a", 1}, 5) == 0)
 -- Wraparound with extreme indices: both segments are empty rather than the whole list
 assert(#ll.List2List({1, 2, 3}, 2147483647, -2147483648) == 0)
 
+-- A frame near LUAI_MAXCSTACK has to fail the headroom check as a stack
+-- overflow, not continue past it.
+do
+  local extra = table.create(7995, 0)
+  local ok, err = pcall(ll.DeleteSubList, {1, 2, 3}, 1, 1, table.unpack(extra))
+  assert(not ok and string.find(err, "stack overflow"), err)
+end
+
 return "OK"

@@ -315,7 +315,7 @@ static int tmove(lua_State* L)
 // Semantically equivalent to consecutive `table.insert()` calls.
 static int tappend(lua_State* L)
 {
-    lua_checkstack(L, 2);
+    luaL_checkstack(L, 2, "append");
 
     luaL_checktype(L, 1, LUA_TTABLE);
     int top = lua_gettop(L);
@@ -342,7 +342,7 @@ static int textend(lua_State* L)
     // ignore further arguments
     lua_settop(L, 2);
 
-    lua_checkstack(L, 6);
+    luaL_checkstack(L, 6, "extend");
 
     int dn = lua_objlen(L, 1);
     int sn = lua_objlen(L, 2);

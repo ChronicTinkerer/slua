@@ -8,6 +8,7 @@
 #pragma once
 
 #include "lyieldable.h"
+#include "lualib.h"
 
 using Luau::SlotManager;
 using Luau::PrimitiveSlot;
@@ -35,7 +36,7 @@ using Luau::YieldGuard;
     {                                                                        \
         if (status == LUA_YIELDABLE_ABI_QUERY)                               \
             return (version);                                                \
-        lua_checkstack(L, LUA_MINSTACK);                                     \
+        luaL_checkstack(L, LUA_MINSTACK, "continuation");                    \
         return name##_body(L, false, (version));                             \
     }                                                                        \
     static int name##_body(lua_State* L, bool is_init, uint8_t abi_version)

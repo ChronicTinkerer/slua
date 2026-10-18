@@ -77,7 +77,7 @@ SlotManager::SlotManager(lua_State* L, bool is_init, uint8_t abi_version)
     // yield can shrink the stack down.
     int needed = LUA_MINSTACK - lua_gettop(L);
     if (needed > 0)
-        lua_checkstack(L, needed);
+        luaL_checkstack(L, needed, "yieldable frame");
 }
 
 // Creates a yield state userdata at position 1 sized for the entire chain.

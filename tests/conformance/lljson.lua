@@ -805,4 +805,7 @@ end)
 assert(lljson.decode("100000000000000000000") == 1e20)
 assert(lljson.decode("-100000000000000000000") == -1e20)
 
+-- slencode rejects extra arguments like encode does
+assert(not pcall(lljson.slencode, {}, {}, 1))
+
 return 'OK'

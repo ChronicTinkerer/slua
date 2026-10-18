@@ -1079,7 +1079,7 @@ static int str_find_match_body(lua_State* L, bool is_init, uint8_t abi_version, 
             if (match_mode == MatchMode::FIND)
             {
                 int ncaps = push_captures(&ms, nullptr, nullptr);
-                lua_checkstack(L, 2);
+                luaL_checkstack(L, 2, "match bounds");
                 lua_pushinteger(L, s1_off + 1);
                 lua_insert(L, STACK_WIRE + 1);
                 lua_pushinteger(L, end_off);
@@ -1198,7 +1198,7 @@ DEFINE_YIELDABLE_EXTERN(yieldable_gmatch_aux, 0)
             const char* match_start = s + src_off;
             const char* match_end = s + end_off;
             int ncaps = push_captures(&ms, match_start, match_end);
-            lua_checkstack(L, 1);
+            luaL_checkstack(L, 1, "gmatch position");
             int newstart = end_off;
             if (end_off == src_off)
                 newstart++;
@@ -1351,7 +1351,7 @@ DEFINE_YIELDABLE_EXTERN(yieldable_str_gsub, 0)
                 ++n;
 
                 // Ensure stack headroom for replacement processing.
-                lua_checkstack(L, nlevels + 2);
+                luaL_checkstack(L, nlevels + 2, "too many captures");
 
                 if (repl_type == LUA_TFUNCTION)
                 {

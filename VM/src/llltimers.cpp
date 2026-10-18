@@ -84,7 +84,7 @@ int luaSL_createtimermanager(lua_State *L)
     if (!lua_touserdatatagged(L, -1, UTAG_LLEVENTS))
         luaL_typeerror(L, -1, "LLEvents");
 
-    lua_checkstack(L, 5);
+    luaL_checkstack(L, 5, "timer manager");
 
     // Store LLEvents reference and remove from stack
     int llevents_ref = lua_ref(L, -1);
@@ -510,7 +510,7 @@ DEFINE_YIELDABLE(lltimers_tick, 0)
     }
 
     auto *sl_state = LUAU_GET_SL_VM_STATE(L);
-    lua_checkstack(L, 10);
+    luaL_checkstack(L, 10, "timer tick");
 
     YIELD_DISPATCH_BEGIN(phase, slots);
     YIELD_DISPATCH(INTERRUPT_CHECK);

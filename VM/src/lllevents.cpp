@@ -24,7 +24,7 @@ int timer_wrapper_guard(lua_State *L)
 
 int luaSL_pushdetectedevent(lua_State *L, int index, bool valid, bool can_change_damage)
 {
-    lua_checkstack(L, 1);
+    luaL_checkstack(L, 1, "detected event");
     auto *detected_event = (lua_DetectedEvent *)lua_newuserdatataggedwithmetatable(L, sizeof(lua_DetectedEvent), UTAG_DETECTED_EVENT);
     detected_event->index = index;
     detected_event->valid = valid;
@@ -187,7 +187,7 @@ static void llevents_dtor(lua_State *L, void *data)
 
 int luaSL_createeventmanager(lua_State *L)
 {
-    lua_checkstack(L, 2);
+    luaL_checkstack(L, 2, "event manager");
     auto *llevents = (lua_LLEvents *)lua_newuserdatataggedwithmetatable(L, sizeof(lua_LLEvents), UTAG_LLEVENTS);
     llevents->handlers_tab_ref = -1;  // Initialize before allocations
 
@@ -617,7 +617,7 @@ DEFINE_YIELDABLE(llevents_handle_event, 0)
         }
     }
 
-    lua_checkstack(L, lua_gettop(L) * 3);
+    luaL_checkstack(L, lua_gettop(L) * 3, "event arguments");
 
     YIELD_DISPATCH_BEGIN(phase, slots);
     YIELD_DISPATCH(INTERRUPT_CHECK);

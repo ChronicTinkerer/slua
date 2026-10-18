@@ -335,7 +335,7 @@ static void json_append_string(lua_State *l, strbuf_t *json, int lindex)
             // This is something we're going to have to call into the metatable for.
             // ServerLua: luaL_tolstring needs stack space for metatable lookup and
             //  potential `__tostring` call
-            lua_checkstack(l, 5);
+            luaL_checkstack(l, 5, "tostring");
             str = luaL_tolstring(l, lindex, &len);
             break;
         default:
@@ -719,7 +719,7 @@ static void json_append_tagged_uuid(lua_State *l, strbuf_t *json, int lindex, bo
         int top = lua_gettop(l);
         size_t len;
         // luaL_tolstring needs stack space for metatable lookup and potential __tostring call
-        lua_checkstack(l, 5);
+        luaL_checkstack(l, 5, "tostring");
         const char *str = luaL_tolstring(l, lindex, &len);
         strbuf_append_string(json, "\"!u");
         strbuf_append_mem(json, str, len);
@@ -1295,7 +1295,7 @@ static int json_encode_common(lua_State* l, bool is_init, uint8_t abi_version, b
     YIELD_DISPATCH_END();
 
     // Resolve __tojson on root value before replacer (JS compat: toJSON -> replacer)
-    lua_checkstack(l, 4);
+    luaL_checkstack(l, 4, "root value");
     if (cfg.has_replacer && !cfg.skip_tojson && lua_istable(l, (int)EncodeStack::VALUE)
         && luaL_getmetafield(l, (int)EncodeStack::VALUE, "__tojson")) {
         lua_pushvalue(l, (int)EncodeStack::VALUE);     // self
@@ -1350,13 +1350,13 @@ static int json_encode_k(lua_State* l, int status)
 {
     if (status == LUA_YIELDABLE_ABI_QUERY)
         return JSON_ENCODE_ABI_VERSION;
-    lua_checkstack(l, LUA_MINSTACK);
+    luaL_checkstack(l, LUA_MINSTACK, "continuation");
     return json_encode_common(l, false, JSON_ENCODE_ABI_VERSION, false);
 }
 static int json_encode_sl(lua_State* l)
 {
     int nargs = lua_gettop(l);
-    luaL_checkany(l, 1);
+    luaL_argcheck(l, nargs >= 1 && nargs <= 2, 1, "expected 1-2 arguments");
     if (nargs >= 2)
         luaL_checktype(l, 2, LUA_TTABLE);
     return json_encode_common(l, true, JSON_ENCODE_ABI_VERSION, true);
@@ -1365,7 +1365,7 @@ static int json_encode_sl_k(lua_State* l, int status)
 {
     if (status == LUA_YIELDABLE_ABI_QUERY)
         return JSON_ENCODE_ABI_VERSION;
-    lua_checkstack(l, LUA_MINSTACK);
+    luaL_checkstack(l, LUA_MINSTACK, "continuation");
     return json_encode_common(l, false, JSON_ENCODE_ABI_VERSION, true);
 }
 
@@ -2294,7 +2294,7 @@ static void json_process_value(lua_State* l, SlotManager& parent_slots,
     YIELD_DISPATCH(ARRAY);
     YIELD_DISPATCH_END();
 
-    lua_checkstack(l, 1);
+    luaL_checkstack(l, 1, "decoded value");
     switch (token->type) {
     case T_STRING:
         if (json->cfg->sl_tagged_types &&
@@ -2467,7 +2467,7 @@ static int json_decode_common(lua_State* l, bool is_init, uint8_t abi_version, b
     // Call reviver on root value if present
     if (json.has_reviver) {
         // Stack: [..., decoded_value]
-        lua_checkstack(l, 5);
+        luaL_checkstack(l, 5, "root reviver");
         lua_pushvalue(l, (int)DecodeStack::REVIVER);  // reviver
         lua_pushnil(l);        // key = nil (root)
         lua_pushvalue(l, -3);  // decoded value
@@ -2506,7 +2506,7 @@ static int json_decode_k(lua_State* l, int status)
 {
     if (status == LUA_YIELDABLE_ABI_QUERY)
         return JSON_DECODE_ABI_VERSION;
-    lua_checkstack(l, LUA_MINSTACK);
+    luaL_checkstack(l, LUA_MINSTACK, "continuation");
     return json_decode_common(l, false, JSON_DECODE_ABI_VERSION, false);
 }
 static int json_decode_sl(lua_State* l)
@@ -2522,7 +2522,7 @@ static int json_decode_sl_k(lua_State* l, int status)
 {
     if (status == LUA_YIELDABLE_ABI_QUERY)
         return JSON_DECODE_ABI_VERSION;
-    lua_checkstack(l, LUA_MINSTACK);
+    luaL_checkstack(l, LUA_MINSTACK, "continuation");
     return json_decode_common(l, false, JSON_DECODE_ABI_VERSION, true);
 }
 

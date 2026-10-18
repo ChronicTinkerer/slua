@@ -241,7 +241,7 @@ uint8_t luaSL_lsl_type(lua_State *L, int idx)
 
 static int _lsl_cast_internal(lua_State* L, bool in_list, bool neg_zero, bool nil_as_default)
 {
-    lua_checkstack(L, 4);
+    luaL_checkstack(L, 4, "cast");
 
     luaL_checkany(L, 1);
     const TValue *val = luaA_toobject(L, 1);
@@ -599,7 +599,7 @@ static int lsl_table_concat(lua_State *L)
         luaL_errorL(L, "At least one argument must be a table");
 
     lua_settop(L, 2);
-    lua_checkstack(L, 4);
+    luaL_checkstack(L, 4, "table concat");
 
     // Note: reversed because of LSL evaluation order!
     LuaTable *l_h = _lsl_arg_to_table(L, 2);
@@ -1151,7 +1151,7 @@ static int push_uuid_common(lua_State *L, const char *str, size_t len, bool comp
     LUAU_ASSERT(runtime_state != nullptr);
 
     // Make sure we have enough room on the stack for the things we're going to do
-    lua_checkstack(L, 7);
+    luaL_checkstack(L, 7, "uuid");
 
     int top = lua_gettop(L);
 

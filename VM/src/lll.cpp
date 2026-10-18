@@ -319,7 +319,7 @@ static int ll_getlistentrytype(lua_State *L)
 
 static int ll_list2list(lua_State *L)
 {
-    lua_checkstack(L, 5);
+    luaL_checkstack(L, 5, "list conversion");
 
     luaL_checktype(L, 1, LUA_TTABLE);
     auto *h = hvalue(luaA_toobject(L, 1));
@@ -406,7 +406,7 @@ static int ll_dumplist2string(lua_State *L)
     size_t sep_size = 0;
     sep = lua_tolstring(L, 2, &sep_size);
 
-    lua_checkstack(L, 5);
+    luaL_checkstack(L, 5, "list dump");
 
     auto *strbuf = luaYB_push(L);
     for(int i=0; i<len; ++i)
@@ -436,7 +436,7 @@ static int ll_dumplist2string(lua_State *L)
 
 static int ll_deletesublist(lua_State *L)
 {
-    lua_checkstack(L, 4);
+    luaL_checkstack(L, 4, "list slice");
 
     luaL_checktype(L, 1, LUA_TTABLE);
     auto *h = hvalue(luaA_toobject(L, 1));
@@ -513,7 +513,7 @@ static int ll_deletesublist(lua_State *L)
 
 static int ll_listinsertlist(lua_State *L)
 {
-    lua_checkstack(L, 4);
+    luaL_checkstack(L, 4, "list insert");
 
     luaL_checktype(L, 1, LUA_TTABLE);
     auto * dest_h = hvalue(luaA_toobject(L, 1));
@@ -579,7 +579,7 @@ static int ll_listinsertlist(lua_State *L)
 
 static int ll_listreplacelist(lua_State *L)
 {
-    lua_checkstack(L, 5);
+    luaL_checkstack(L, 5, "list replace");
 
     luaL_checktype(L, 1, LUA_TTABLE);
     luaL_checktype(L, 2, LUA_TTABLE);
