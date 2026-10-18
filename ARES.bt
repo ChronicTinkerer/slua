@@ -39,13 +39,23 @@ const uchar UTAG_ARES_TEST = 34;
 /* LUA_UTAG_LIMIT + 1, see ludata.h */
 const uchar UTAG_PROXY = 129;
 
-/* One SlotManager's region of a UTAG_YIELD_STATE buffer. The innermost flag
- * says whether this was the deepest active manager. */
+/* One SlotManager's region of a UTAG_YIELD_STATE buffer, see the layout
+ * comment in VM/include/lyieldable.h. The innermost flag says whether this
+ * was the deepest active manager. */
 typedef struct {
     uint16 length;           /* Slots plus the innermost flag */
     uchar slots[length - 1];
     uint8_t innermost;
 } YieldRegion;
+
+/* The root manager's region: its slots are led by the frame-relative stack
+ * top to restore on resume, 0 when there is nothing to restore. */
+typedef struct {
+    uint16 length;           /* Stack top, slots, and the innermost flag */
+    uint16 stack_top;
+    uchar slots[length - 3];
+    uint8_t innermost;
+} YieldRootRegion;
 
 /* Mirrors enum AresType in VM/src/ares.cpp. These are wire values and are
  * assigned explicitly there - do not derive them from Luau's lua_Type. */
@@ -409,8 +419,13 @@ typedef enum <uint32> {
     // A: target register (see FORGLOOP for register layout)
     LOP_FORGPREP_INEXT,
 
-    // removed in v3
-    LOP_DEP_FORGLOOP_INEXT,
+    // FASTCALL3: perform a fast call of a built-in function using 3 register arguments
+    // A: builtin function id (see LuauBuiltinFunction)
+    // B: source argument register
+    // C: jump offset to get to following CALL
+    // AUX: source register 2 in least-significant byte
+    // AUX: source register 3 in second least-significant byte
+    LOP_FASTCALL3,
 
     // FORGPREP_NEXT: prepare FORGLOOP with 2 output variables (no AUX encoding), assuming generator is luaB_next, and jump to FORGLOOP
     // A: target register (see FORGLOOP for register layout)
@@ -524,14 +539,71 @@ typedef enum <uint32> {
     // C: constant table index (0..255)
     LOP_IDIVK,
 
+    // Atom-based userdata field access acceleration
+    // These are equivalent to their GETTABLEKS/SETTABLEKS/NAMECALL counterparts, except tailored towards userdata field accesses
+    // If the user has registered metamethods for a userdata tag, callbacks will be called by these instructions
+    // NOTE: it uses only lower 2 bytes in AUX for constant index. Higher bytes are used for runtime cache.
+    LOP_GETUDATAKS,
+    LOP_SETUDATAKS,
+    LOP_NAMECALLUDATA,
+
+    // NEWCLASSMEMBER: register this method on a class object.
+    // A: target register of class
+    // B: reserved
+    // C: initial value of this member. currently must be a function.
+    // AUX: The name of this member as a constant string
+    LOP_NEWCLASSMEMBER,
+
+    // CALLFB: call specified function with collecting runtime stats in a feedback slot
+    // A: register where the function object lives, followed by arguments; results are placed starting from the same register
+    // B: argument count + 1, or 0 to preserve all arguments up to top (MULTRET)
+    // C: result count + 1, or 0 to preserve all values and adjust top (MULTRET)
+    // AUX: feedback slot id. 0xFFFFFFFF - sealed
+    LOP_CALLFB,
+
+    // CMPPROTO: check if a register contains a closure with a specified Luau function proto id
+    // A: closure register
+    // D: jump offset if proto doesn't match
+    // AUX: proto id
+    LOP_CMPPROTO,
+
+    // FASTPCALL: perform a fastcall of a built-in protected call function
+    // A: protected function id (0 - pcall, 1 - xpcall)
+    // B: number of explicit arguments before a variadic tail
+    // C: jump offset to get to following CALL
+    LOP_FASTPCALL,
+
+    // The following instructions appear only in experimental bytecode versions and are subject to change
+
+    // NEWCLASS: reify a class object
+    // A: target register of class
+    // B: source register of superclass, or 0xFF if no superclass
+    // C: bottom bit is 1 if the class is open, else 0; upper 7 bits are reserved
+    // AUX: constant table index of unreified class object
+    LOP_NEWCLASS,
+
+    // CONSTRUCT: duplicate table to ra using the constant table template specified in the feedback slot
+    // A: target register
+    // B: register that is likely to hold a class
+    // C: reserved
+    // AUX: feedback slot id
+    LOP_CONSTRUCT,
+
+    // FINCONSTRUCT: checks if object construction initiated by a preceding CONSTRUCT succeeded
+    // A: source register
+    // B: reserved
+    // C: jump offset to get to following CALL
+    LOP_FINCONSTRUCT,
+
     LOP__COUNT,
 
-    LOP__LSL_START = 200,
+    // LSL-specific opcodes, numbered high so they don't collide with Luau's
+    LOP_LSL__START = 200,
 
     // LSL_DOUBLE2FLOAT: truncate double to 32-bit float range
     // A: target register
     // B: source register
-    LOP_LSL_DOUBLE2FLOAT,
+    LOP_LSL_DOUBLE2FLOAT = LOP_LSL__START,
 
     // LSL_CASTINTFLOAT: convert between LSL integer and float
     // A: target register
@@ -539,12 +611,12 @@ typedef enum <uint32> {
     // C: direction (0 = int->float, 1 = float->int)
     LOP_LSL_CASTINTFLOAT,
 
-    LOP__LSL_END
+    LOP_LSL__END = LOP_LSL_CASTINTFLOAT
 } LuauOpCode;
 
 string ReadInstruction(uint32 o) {
     local uint32 shifted_o = (o & 255);
-    if (shifted_o >= LOP__COUNT)
+    if (shifted_o >= LOP__COUNT && (shifted_o < LOP_LSL__START || shifted_o > LOP_LSL__END))
         return Str("%u", o);
     local LuauOpCode en_o = shifted_o;
     return EnumToString(en_o);
@@ -795,6 +867,13 @@ typedef struct {
         Object metatable;
         break;
     }
+    case UTAG_QUATERNION:
+    {
+        /* Raw float[4], see llsl.cpp */
+        UVarint length;
+        float q[4];
+        break;
+    }
     case UTAG_UUID:
     {
         Object data;
@@ -831,7 +910,8 @@ typedef struct {
         UVarint length;
         local int64 end = FTell() + length.v;
         uint8_t abi_version; /* The frame's continuation must answer with at least this */
-        local int innermost = 0;
+        YieldRootRegion root;
+        local int innermost = root.innermost;
         while (!innermost)
         {
             YieldRegion region;
