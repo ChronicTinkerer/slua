@@ -307,8 +307,8 @@ template<class T>
 class LSLASTNodeList : public LSLASTNode {
   static_assert(std::is_base_of<LSLASTNode, T>::value, "T Must derive from LSLASTNode!");
   public:
-    explicit LSLASTNodeList<T>(ScriptContext *ctx) : LSLASTNode(ctx, 0) {};
-    LSLASTNodeList<T>(ScriptContext *ctx, class LSLASTNode *nodes ) : LSLASTNodeList(ctx) {
+    explicit LSLASTNodeList(ScriptContext *ctx) : LSLASTNode(ctx, 0) {};
+    LSLASTNodeList(ScriptContext *ctx, class LSLASTNode *nodes ) : LSLASTNodeList(ctx) {
       if (nodes)
         pushChild(nodes);
     };
