@@ -27,4 +27,11 @@ local nested_result = dangerouslyexecuterequiredmodule(function()
 end)
 assert(nested_result == "nested break", "Should handle nested breaks")
 
+-- Extra arguments are dropped, so the continuation still finds the thread
+local extra = dangerouslyexecuterequiredmodule(function()
+    breaker()
+    return "extra ignored"
+end, 1, 2)
+assert(extra == "extra ignored", "Should ignore extra arguments across a break")
+
 return "OK"

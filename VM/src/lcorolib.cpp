@@ -556,6 +556,8 @@ static int auxsandboxedfinishy(lua_State* L, lua_State* co, int n)
 static int dangerouslyexecuterequiredmodule(lua_State* L)
 {
     luaL_checktype(L, 1, LUA_TFUNCTION);
+    // The continuation finds the thread at index 2
+    lua_settop(L, 1);
 
     if (!lua_isLfunction(L, 1))
         luaL_error(L, "Lua function expected");
