@@ -2279,15 +2279,13 @@ static void json_process_value(lua_State* l, SlotManager& parent_slots,
 
     SlotManager slots(parent_slots);
     DEFINE_SLOT(Phase, phase, Phase::DEFAULT);
+    /* The offset before the value's first token, so a resume can rebuild
+     * `token` by parsing it again. */
     DEFINE_SLOT(int32_t, ptr_offset, json_get_offset(json));
     slots.finalize();
 
     json_restore_offset(json, ptr_offset);
-
-    /* Parse token (re-parsed on resume from saved ptr_offset) */
     json_next_token(json, token);
-    if (slots.isInit())
-        ptr_offset = json_get_offset(json);
 
     YIELD_DISPATCH_BEGIN(phase, slots);
     YIELD_DISPATCH(OBJECT);

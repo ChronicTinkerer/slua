@@ -556,6 +556,15 @@ DEFINE_YIELDABLE(llevents_handle_event, 0)
         CALL_HANDLER = 2,
     };
 
+    // Validated before the yield slot shifts the arguments, so errors name
+    // the caller's indices
+    if (is_init)
+    {
+        if (!lua_touserdatatagged(L, 1, UTAG_LLEVENTS))
+            luaL_typeerror(L, 1, "LLEvents");
+        luaL_checktype(L, 2, LUA_TSTRING);
+    }
+
     SlotManager slots(L, is_init, abi_version);
 
     DEFINE_SLOT(Phase, phase, Phase::DEFAULT);
@@ -568,12 +577,7 @@ DEFINE_YIELDABLE(llevents_handle_event, 0)
     if (is_init)
     {
         auto *llevents = (const lua_LLEvents *)lua_touserdatatagged(L, 2, UTAG_LLEVENTS);
-        if (!llevents)
-            luaL_typeerror(L, 2, "LLEvents");
-
-        luaL_checktype(L, 3, LUA_TSTRING);
-
-        const char *event_name = luaL_checkstring(L, 3);
+        const char *event_name = lua_tostring(L, 3);
         nargs = lua_gettop(L) - ARG_START + 1;
         is_multi = is_multi_event(event_name);
         bool can_adjust_damage = is_multi && (strcmp(event_name, "on_damage") == 0);

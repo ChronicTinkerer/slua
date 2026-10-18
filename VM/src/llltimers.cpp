@@ -467,6 +467,11 @@ DEFINE_YIELDABLE(lltimers_tick, 0)
         CALL_HANDLER = 2,
     };
 
+    // Validated before the yield slot shifts the arguments, so errors name
+    // the caller's indices
+    if (is_init && !lua_touserdatatagged(L, 1, UTAG_LLTIMERS))
+        luaL_typeerror(L, 1, "LLTimers");
+
     SlotManager slots(L, is_init, abi_version);
 
     DEFINE_SLOT(Phase, phase, Phase::DEFAULT);
@@ -478,9 +483,6 @@ DEFINE_YIELDABLE(lltimers_tick, 0)
     {
         // SlotManager already inserted nil at position 1; self is at LLTIMERS_USERDATA (2)
         auto *lltimers = (lua_LLTimers *)lua_touserdatatagged(L, LLTIMERS_USERDATA, UTAG_LLTIMERS);
-        if (!lltimers)
-            luaL_typeerror(L, LLTIMERS_USERDATA, "LLTimers");
-
         lua_settop(L, LLTIMERS_USERDATA);
 
         // Check for reentrancy

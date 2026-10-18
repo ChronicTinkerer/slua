@@ -808,6 +808,15 @@ DEFINE_YIELDABLE(tsort, 0)
         SORT = 1,
     };
 
+    // Validated before the yield slot shifts the arguments, so errors name
+    // the caller's indices
+    if (is_init)
+    {
+        luaL_checktype(L, 1, LUA_TTABLE);
+        if (!lua_isnoneornil(L, 2))
+            luaL_checktype(L, 2, LUA_TFUNCTION);
+    }
+
     SlotManager slots(L, is_init, abi_version);
     DEFINE_SLOT(Phase, phase, Phase::DEFAULT);
     DEFINE_SLOT(int32_t, n, 0);
@@ -820,17 +829,12 @@ DEFINE_YIELDABLE(tsort, 0)
 
     if (slots.isInit())
     {
-        luaL_checktype(L, 2, LUA_TTABLE);
         LuaTable* t = hvalue(L->base + 1);
         n = luaH_getn(t);
         if (t->readonly)
             luaG_readonlyerror(L);
 
-        if (!lua_isnoneornil(L, 3))
-        {
-            luaL_checktype(L, 3, LUA_TFUNCTION);
-            use_pred = true;
-        }
+        use_pred = !lua_isnoneornil(L, 3);
         lua_settop(L, 3);
     }
 
@@ -877,20 +881,25 @@ DEFINE_YIELDABLE(tfind, 0)
         LOOP = 1,
     };
 
+    // Validated before the yield slot shifts the arguments, so errors name
+    // the caller's indices
+    int init = 1;
+    if (is_init)
+    {
+        luaL_checktype(L, 1, LUA_TTABLE);
+        luaL_checkany(L, 2);
+        init = luaL_optinteger(L, 3, 1);
+        if (init < 1)
+            luaL_argerror(L, 3, "index out of range");
+    }
+
     SlotManager slots(L, is_init, abi_version);
     DEFINE_SLOT(Phase, phase, Phase::DEFAULT);
-    DEFINE_SLOT(int32_t, i, 1);
+    DEFINE_SLOT(int32_t, i, init);
     slots.finalize();
 
     if (slots.isInit())
-    {
-        luaL_checktype(L, 2, LUA_TTABLE);
-        luaL_checkany(L, 3);
-        i = luaL_optinteger(L, 4, 1);
-        if (i < 1)
-            luaL_argerror(L, 4, "index out of range");
         lua_settop(L, 3);
-    }
 
     // ServerLua: __eq can only fire if the search value is a table or userdata;
     // equalobj short-circuits on ttype mismatch before reaching luaV_equalval.

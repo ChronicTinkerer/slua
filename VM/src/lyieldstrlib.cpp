@@ -934,15 +934,17 @@ static int str_find_match_body(lua_State* L, bool is_init, uint8_t abi_version, 
         PLAIN_YIELD = 2,
     };
 
-    // Fast path: plain find or no-specials pattern — bypass all yieldable
-    // machinery. Pre-SlotManager arg positions: source=1, pattern=2, init=3, plain=4.
+    // Arguments are validated before the yield slot shifts them, so errors
+    // name the caller's indices: source=1, pattern=2, init=3, plain=4. The
+    // plain fast path lives here too, it needs none of the yieldable machinery.
+    int init = 1;
     bool literal = false;
-    if (is_init && match_mode == MatchMode::FIND)
+    if (is_init)
     {
         size_t ls, lp;
         const char* s = luaL_checklstring(L, 1, &ls);
         const char* p = luaL_checklstring(L, 2, &lp);
-        int init = posrelat(luaL_optinteger(L, 3, 1), ls);
+        init = posrelat(luaL_optinteger(L, 3, 1), ls);
         if (init < 1)
             init = 1;
         else if (init > (int)ls + 1)
@@ -950,21 +952,24 @@ static int str_find_match_body(lua_State* L, bool is_init, uint8_t abi_version, 
             lua_pushnil(L);
             return 1;
         }
-        literal = lua_toboolean(L, 4) || (lp <= SHORT_PATTERN && nospecials(p, lp));
-        // lmemfind has no yield check, so it is gated on the work it can do:
-        // a memcmp of up to lp bytes at each remaining position. Past that,
-        // a literal search takes the yieldable plain loop below.
-        if (literal && lp * (ls - init + 1) <= MAX_PLAIN_WORK)
+        if (match_mode == MatchMode::FIND)
         {
-            const char* s2 = lmemfind(s + init - 1, ls - init + 1, p, lp);
-            if (s2)
+            literal = lua_toboolean(L, 4) || (lp <= SHORT_PATTERN && nospecials(p, lp));
+            // lmemfind has no yield check, so it is gated on the work it can do:
+            // a memcmp of up to lp bytes at each remaining position. Past that,
+            // a literal search takes the yieldable plain loop below.
+            if (literal && lp * (ls - init + 1) <= MAX_PLAIN_WORK)
             {
-                lua_pushinteger(L, (int)(s2 - s + 1));
-                lua_pushinteger(L, (int)(s2 - s + lp));
-                return 2;
+                const char* s2 = lmemfind(s + init - 1, ls - init + 1, p, lp);
+                if (s2)
+                {
+                    lua_pushinteger(L, (int)(s2 - s + 1));
+                    lua_pushinteger(L, (int)(s2 - s + lp));
+                    return 2;
+                }
+                lua_pushnil(L);
+                return 1;
             }
-            lua_pushnil(L);
-            return 1;
         }
     }
 
@@ -980,18 +985,6 @@ static int str_find_match_body(lua_State* L, bool is_init, uint8_t abi_version, 
 
     if (is_init)
     {
-        size_t ls, lp;
-        luaL_checklstring(L, ARG_SOURCE, &ls);
-        const char* p = luaL_checklstring(L, ARG_PATTERN, &lp);
-        int init = posrelat(luaL_optinteger(L, ARG_INIT, 1), ls);
-        if (init < 1)
-            init = 1;
-        else if (init > (int)ls + 1)
-        {
-            lua_pushnil(L);
-            return 1;
-        }
-
         is_plain = literal;
         s1_off = init - 1;
 
@@ -1003,6 +996,8 @@ static int str_find_match_body(lua_State* L, bool is_init, uint8_t abi_version, 
         else
         {
             // Pattern search: set up loop state
+            size_t lp;
+            const char* p = lua_tolstring(L, ARG_PATTERN, &lp);
             is_anchor = (*p == '^');
             if (is_anchor)
             {
@@ -1263,12 +1258,29 @@ DEFINE_YIELDABLE_EXTERN(yieldable_str_gsub, 0)
         REPL_CALL = 2,
     };
 
+    // Validated before the yield slot shifts the arguments, so errors name
+    // the caller's indices: source=1, pattern=2, replacement=3, count=4
+    int init_repl_type = 0;
+    int init_max_s = 0;
+    if (is_init)
+    {
+        size_t srcl;
+        luaL_checklstring(L, 1, &srcl);
+        luaL_checkstring(L, 2);
+        init_repl_type = lua_type(L, 3);
+        luaL_argexpected(L,
+            init_repl_type == LUA_TNUMBER || init_repl_type == LUA_TSTRING ||
+            init_repl_type == LUA_TFUNCTION || init_repl_type == LUA_TTABLE,
+            3, "string/function/table");
+        init_max_s = luaL_optinteger(L, 4, (int)srcl + 1);
+    }
+
     SlotManager slots(L, is_init, abi_version);
     DEFINE_SLOT(Phase, phase, Phase::DEFAULT);
     DEFINE_SLOT(int32_t, n, 0);
     DEFINE_SLOT(int32_t, src_off, 0);
-    DEFINE_SLOT(int32_t, max_s, 0);
-    DEFINE_SLOT(int32_t, repl_type, 0);
+    DEFINE_SLOT(int32_t, max_s, init_max_s);
+    DEFINE_SLOT(int32_t, repl_type, init_repl_type);
     DEFINE_SLOT(int32_t, end_off, 0);
     DEFINE_SLOT(bool, is_anchor, false);
     slots.finalize();
@@ -1280,20 +1292,8 @@ DEFINE_YIELDABLE_EXTERN(yieldable_str_gsub, 0)
 
     if (is_init)
     {
-        size_t srcl, lp;
-        luaL_checklstring(L, ARG_SOURCE, &srcl);
-        const char* p = luaL_checklstring(L, ARG_PATTERN, &lp);
-        int t = lua_type(L, ARG_REPL);
-        luaL_argexpected(L,
-            t == LUA_TNUMBER || t == LUA_TSTRING ||
-            t == LUA_TFUNCTION || t == LUA_TTABLE,
-            ARG_REPL, "string/function/table");
-
-        repl_type = t;
-        max_s = luaL_optinteger(L, ARG_REPL + 1, (int)srcl + 1);
-        n = 0;
-        src_off = 0;
-        end_off = 0;
+        size_t lp;
+        const char* p = lua_tolstring(L, ARG_PATTERN, &lp);
 
         // Check anchor and strip from pattern on stack
         if (*p == '^')
