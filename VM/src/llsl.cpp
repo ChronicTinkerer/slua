@@ -1440,13 +1440,11 @@ int luaSL_checkindexlike(lua_State *L, int index)
 void luaSL_pushboollike(lua_State *L, int val)
 {
     bool compat_mode = lua_toboolean(L, lua_upvalueindex(1));
-    if (!compat_mode)
-    {
-        // We want to push _real_ booleans if we're not in compat mode.
-        lua_pushboolean(L, val == 0);
-    }
-
-    luaSL_pushnativeinteger(L, val);
+    // Real booleans outside compat mode, LSL's integer inside it
+    if (compat_mode)
+        luaSL_pushnativeinteger(L, val);
+    else
+        lua_pushboolean(L, val != 0);
 }
 
 static const luaL_Reg lsllib[] = {
