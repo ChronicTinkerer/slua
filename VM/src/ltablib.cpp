@@ -16,7 +16,7 @@
 // ServerLua: yieldable table.sort
 #include "lyieldablemacros.h"
 
-LUAU_DYNAMIC_FASTFLAGVARIABLE(LuauTableMoveTimeoutFix, false)
+LUAU_DYNAMIC_FASTFLAGVARIABLE(LuauTableFindImprovement, false)
 
 static int foreachi(lua_State* L)
 {
@@ -159,7 +159,7 @@ static void moveelements(lua_State* L, int srct, int dstt, int f, int e, int t, 
 
         luaC_barrierfast(L, dst);
     }
-    else if (DFFlag::LuauTableMoveTimeoutFix && sparsemove)
+    else if (sparsemove)
     {
         int srcta = lua_absindex(L, srct);
         int dstta = lua_absindex(L, dstt);
@@ -298,7 +298,7 @@ static int tmove(lua_State* L)
         if (dst->readonly) // also checked in moveelements, but this blocks resizes of r/o tables
             luaG_readonlyerror(L);
 
-        bool sparsemove = DFFlag::LuauTableMoveTimeoutFix && shouldsparsemove(hvalue(L->base), dst, n);
+        bool sparsemove = shouldsparsemove(hvalue(L->base), dst, n);
 
         if (t > 0 && (t - 1) <= dst->sizearray && (t - 1 + n) > dst->sizearray)
         { // grow the destination table array
@@ -871,7 +871,8 @@ static int tcreate(lua_State* L)
     return 1;
 }
 
-// ServerLua: made this yieldable due to __eq hooks
+// ServerLua: made this yieldable due to __eq hooks. Upstream's
+// LuauTableFindImprovement / luaH_rawfind version was dropped intentionally.
 DEFINE_YIELDABLE(tfind, 0)
 {
     YIELDABLE_RETURNS_DEFAULT;
