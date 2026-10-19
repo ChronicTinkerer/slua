@@ -244,29 +244,27 @@ static int _lsl_cast_internal(lua_State* L, bool in_list, bool neg_zero, bool ni
     luaL_checkstack(L, 4, "cast");
 
     luaL_checkany(L, 1);
-    const TValue *val = luaA_toobject(L, 1);
+    // Local copy so we can normalize it
+    TValue val_copy;
+    setobj(L, &val_copy, luaA_toobject(L, 1));
+    const TValue *val = &val_copy;
+
+    if (ttisboolean(val))
+        setintvalue(&val_copy, bvalue(val));
+
     int to_type = luaL_checkinteger(L, 2);
     // Since we don't allow this to be called with arbitrary args, this must be valid.
     LUAU_ASSERT(to_type < (int)LSLIType::LST_ERROR);
     auto to_lsl_type = (LSLIType)to_type;
-    auto existing_type = (LSLIType)luaSL_lsl_type(L, 1);
+    auto existing_type = (LSLIType)lua_lsl_type(val);
 
     if (existing_type == LSLIType::LST_ERROR)
-    {
-        // Hack to let bool -> int work, even though it's not a real LSL type
-        auto lua_existing_type = lua_type(L, 1);
-        if (lua_existing_type == LUA_TBOOLEAN && to_type == (int)LSLIType::LST_INTEGER)
-        {
-            luaSL_pushinteger(L, luaL_checkboolean(L, 1));
-            return 1;
-        }
         return 0;
-    }
 
     if (to_lsl_type == existing_type)
     {
         // Self-cast, just return the object.
-        lua_pushvalue(L, 1);
+        luaA_pushvalue(L, val);
         return 1;
     }
 
@@ -275,7 +273,7 @@ static int _lsl_cast_internal(lua_State* L, bool in_list, bool neg_zero, bool ni
         // Create a single-element table, with this value as the only entry
         lua_createtable(L, 1, 0);
         LuaTable *tab = hvalue(luaA_toobject(L, -1));
-        setobj(L, &tab->array[0], luaA_toobject(L, 1));
+        setobj(L, &tab->array[0], val);
         return 1;
     }
 

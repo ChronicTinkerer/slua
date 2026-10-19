@@ -77,6 +77,12 @@ assert(ll.GetListEntryType({"a", 1}, 5) == 0)
 -- Wraparound with extreme indices: both segments are empty rather than the whole list
 assert(#ll.List2List({1, 2, 3}, 2147483647, -2147483648) == 0)
 
+-- Booleans in lists act as integers
+assert(ll.DumpList2String({"a", true, false}, "|") == "a|1|0")
+assert(ll.List2String({true, false}, 1) == "1")
+assert(ll.List2String({true, false}, 2) == "0")
+assert(ll.List2Float({true}, 1) == 1)
+
 -- A frame near LUAI_MAXCSTACK has to fail the headroom check as a stack
 -- overflow, not continue past it.
 do
