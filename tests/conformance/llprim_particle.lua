@@ -1,7 +1,6 @@
--- Conformance test for llprim.ParticleSystem().
--- The C++ test harness registers a mock ll.LinkParticleSystem that stores
--- _captured_link and _captured_rules as globals, and registers llprim
--- with a subset of particle descriptors:
+-- Conformance test for ruleset serialization with flag descriptors.
+-- The C++ test harness registers serialize_particles(params), which returns
+-- the rules list for a subset of particle descriptors:
 --   flags      'i' tag 0  (backing field for flag bits)
 --   color_begin 'v' tag 1
 --   alpha_begin 'f' tag 2
@@ -13,18 +12,18 @@
 --   emissive      0x100
 
 local function check(params, expected_rules)
-    llprim.ParticleSystem(params)
-    local got, want = lljson.slencode(_captured_rules), lljson.slencode(expected_rules)
+    local got, want = lljson.slencode(serialize_particles(params)), lljson.slencode(expected_rules)
     assert(got == want, `expected {want}, got {got}`)
 end
 
--- Link handling: nil params emits empty rules and defaults to LINK_THIS;
--- an explicit link number is forwarded.
-llprim.ParticleSystem(nil)
-assert(_captured_link == LINK_THIS, `default link: got {_captured_link}`)
-assert(lljson.slencode(_captured_rules) == "[]", "nil params: rules should be empty")
-llprim.ParticleSystem(nil, 3)
-assert(_captured_link == 3, `explicit link: got {_captured_link}`)
+-- nil params emits empty rules.
+check(nil, {})
+
+-- Params must be a table or nil.
+for _, bad in {5, "x", vector(1, 2, 3)} do
+    local ok, err = pcall(serialize_particles, bad)
+    assert(not ok and string.find(err, "table expected"), `expected a table error for {typeof(bad)}, got {err}`)
+end
 
 -- Scalar float and vector properties are serialized with their tags.
 check({ burst_rate = 2.5 }, {PSYS_SRC_BURST_RATE, 2.5})
@@ -67,7 +66,7 @@ check({ flags = 2.9 }, {PSYS_PART_FLAGS, 2})
 check({ flags = 1e300 }, {PSYS_PART_FLAGS, -2147483648})
 
 -- Flag properties only accept booleans and numbers.
-local ok, err = pcall(llprim.ParticleSystem, { color_interp = "yes" })
+local ok, err = pcall(serialize_particles, { color_interp = "yes" })
 assert(not ok and string.find(err, "color_interp"), `expected a color_interp error, got {err}`)
 
 return "OK"

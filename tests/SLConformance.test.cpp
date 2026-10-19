@@ -1759,6 +1759,14 @@ TEST_CASE("Memory hygiene")
     runConformance("memory_hygiene.lua");
 }
 
+// Expose fn as a global with def as upvalue 1
+static void registerRulesetTestFn(lua_State* L, const char* name, lua_CFunction fn, const RulesetBuilderDef* def)
+{
+    lua_pushlightuserdata(L, (void*)def);
+    lua_pushcclosurek(L, fn, name, 1, nullptr);
+    lua_setglobal(L, name);
+}
+
 TEST_CASE("llparticle")
 {
     static const RulesetParamDescriptor kDescs[] = {
@@ -1780,34 +1788,16 @@ TEST_CASE("llparticle")
     }();
 
     runConformance("llprim_particle.lua", nullptr, [](lua_State* L) {
-        // Mock ll.LinkParticleSystem so the dispatch wrapper can be exercised.
-        static const luaL_Reg test_ll_lib[] = {
-            {"LinkParticleSystem", [](lua_State* L) -> int {
-                luaL_checkinteger(L, 1);
-                luaL_checktype(L, 2, LUA_TTABLE);
-                lua_pushvalue(L, 1);
-                lua_setglobal(L, "_captured_link");
-                lua_pushvalue(L, 2);
-                lua_setglobal(L, "_captured_rules");
-                return 0;
-            }},
-            {nullptr, nullptr}
-        };
-        luaL_register_noclobber(L, LUA_LLLIBNAME, test_ll_lib);
+        slua_ruleset_fix_names(L, s_def);
+        lua_pushstring(L, "color_interp");
+        REQUIRE(isfixed(gcvalue(luaA_toobject(L, -1))));
+        lua_pop(L, 1);
 
-        auto particle_system = [](lua_State* L) -> int {
+        registerRulesetTestFn(L, "serialize_particles", [](lua_State* L) -> int {
             const auto* def = (const RulesetBuilderDef*)lua_tolightuserdata(L, lua_upvalueindex(1));
-            int link = lua_isnoneornil(L, 2) ? SLUA_LINK_THIS : luaL_checkinteger(L, 2);
             slua_ruleset_serialize(L, 1, def);
-            int rules_idx = lua_gettop(L);
-            lua_rawgetfield(L, LUA_BASEGLOBALSINDEX, "ll");
-            lua_rawgetfield(L, -1, "LinkParticleSystem");
-            lua_pushinteger(L, link);
-            lua_pushvalue(L, rules_idx);
-            lua_call(L, 2, 0);
-            return 0;
-        };
-        slua_register_ruleset_fn(L, "llprim", "ParticleSystem", particle_system, s_def);
+            return 1;
+        }, s_def);
     });
 }
 
@@ -1827,15 +1817,26 @@ TEST_CASE("ruleset_builder_collection")
     }();
 
     runConformance("ruleset_builder_collection.lua", nullptr, [](lua_State* L) {
-        // Mock apply function: coerce params (dict->list if needed) and store as _captured_rules.
-        auto apply_fn = [](lua_State* L) -> int {
+        slua_ruleset_fix_names(L, s_def);
+        lua_pushstring(L, "custom_headers");
+        REQUIRE(isfixed(gcvalue(luaA_toobject(L, -1))));
+        lua_pop(L, 1);
+
+        // Coerce params (dict->list if needed) and return them
+        registerRulesetTestFn(L, "ruleset_apply", [](lua_State* L) -> int {
             const auto* def = (const RulesetBuilderDef*)lua_tolightuserdata(L, lua_upvalueindex(1));
             slua_ruleset_coerce(L, 1, def);
+            lua_settop(L, 1);
+            return 1;
+        }, s_def);
+
+        // Serialize through a relative index
+        registerRulesetTestFn(L, "ruleset_serialize_rel", [](lua_State* L) -> int {
+            const auto* def = (const RulesetBuilderDef*)lua_tolightuserdata(L, lua_upvalueindex(1));
             lua_pushvalue(L, 1);
-            lua_setglobal(L, "_captured_rules");
-            return 0;
-        };
-        slua_register_ruleset_fn(L, "testbuilder", "apply", apply_fn, s_def);
+            slua_ruleset_serialize(L, -1, def);
+            return 1;
+        }, s_def);
     });
 }
 

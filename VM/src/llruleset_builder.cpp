@@ -1,6 +1,5 @@
 #define llruleset_builder_c
 
-#include <string>
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
@@ -13,9 +12,12 @@
 #include "llruleset_builder.h"
 
 #include "lapi.h"
+#include "lgc.h"
 #include "lobject.h"
 #include "ltable.h"
 #include "lstring.h"
+#include "lstrbuf.h"
+#include "lvm.h"
 
 struct RulesetBuilderDef
 {
@@ -26,35 +28,39 @@ struct RulesetBuilderDef
 namespace
 {
     // Converts the value at TOS to its string representation.
-    // Numbers, booleans, and strings are always converted. Other types
-    // (vectors, quaternions, userdata) are converted only if they have a
-    // __tostring metamethod; everything else is skipped.
+    // Strings, numbers, booleans, vectors, quaternions and UUIDs are converted
+    // as by tostring(); everything else is skipped. Never runs script code, since
+    // the only metatables involved are our own read-only ones.
     // On success: replaces TOS with a Lua string and returns true.
     // On failure: pops TOS and returns false.
     bool slua_ruleset_to_string(lua_State* L)
     {
-        int vtype = lua_type(L, -1);
-
-        // Native conversions -- always well-defined.
-        if (vtype == LUA_TSTRING || vtype == LUA_TNUMBER || vtype == LUA_TBOOLEAN)
+        bool convertible = false;
+        switch (lua_type(L, -1))
         {
-            luaL_tolstring(L, -1, nullptr);
-            lua_remove(L, -2);
-            return true;
+        case LUA_TSTRING:
+        case LUA_TNUMBER:
+        case LUA_TBOOLEAN:
+        case LUA_TVECTOR:
+            convertible = true;
+            break;
+        case LUA_TUSERDATA:
+        {
+            int tag = lua_userdatatag(L, -1);
+            convertible = tag == UTAG_UUID || tag == UTAG_QUATERNION;
+            break;
+        }
         }
 
-        // Other types: only include if __tostring is present; skip the
-        // "typename: 0xaddr" fallback.
-        if (luaL_getmetafield(L, -1, "__tostring"))
+        if (!convertible)
         {
-            lua_pop(L, 1); // pop the metamethod itself
-            luaL_tolstring(L, -1, nullptr);
-            lua_remove(L, -2);
-            return true;
+            lua_pop(L, 1);
+            return false;
         }
 
-        lua_pop(L, 1);
-        return false;
+        luaL_tolstring(L, -1, nullptr);
+        lua_remove(L, -2);
+        return true;
     }
 
     // Encodes a lua array as a CSV string; emit one tag/value pair.
@@ -66,7 +72,9 @@ namespace
         int n = luaH_getn(t);
         if (n > 0)
         {
-            std::string csv;
+            // Rooted on the stack, and its growth is charged against the script's memory limit
+            lua_YieldSafeStrBuf* buf = luaYB_push(L);
+            int buf_idx = lua_gettop(L);
             for (int j = 1; j <= n; ++j)
             {
                 const TValue* elem = luaH_getnum(t, j);
@@ -77,31 +85,40 @@ namespace
                 {
                     size_t len = 0;
                     const char* s = lua_tolstring(L, -1, &len);
-                    if (s)
+                    size_t escapes = 0;
+                    for (size_t k = 0; k < len; ++k)
                     {
-                        if (!csv.empty()) csv += ',';
-                        for (size_t k = 0; k < len; ++k)
-                        {
-                            if (s[k] == '\\' || s[k] == ',') csv += '\\';
-                            csv += s[k];
-                        }
+                        if (s[k] == '\\' || s[k] == ',')
+                            ++escapes;
+                    }
+
+                    size_t sep = luaYB_len(buf) != 0 ? 1 : 0;
+                    luaYB_ensure(L, buf, sep + len + escapes);
+                    if (sep)
+                        luaYB_appendchar_unsafe(buf, ',');
+                    for (size_t k = 0; k < len; ++k)
+                    {
+                        if (s[k] == '\\' || s[k] == ',')
+                            luaYB_appendchar_unsafe(buf, '\\');
+                        luaYB_appendchar_unsafe(buf, s[k]);
                     }
                     lua_pop(L, 1);
                 }
             }
-            lua_pop(L, 1); // pop the array
-            if (!csv.empty())
+
+            if (luaYB_len(buf) != 0)
             {
+                luaYB_tostring(L, buf_idx, true);
                 lua_pushinteger(L, desc.tag);
                 lua_rawseti(L, list, ++idx);
-                lua_pushlstring(L, csv.c_str(), csv.size());
                 lua_rawseti(L, list, ++idx);
             }
+            else
+            {
+                lua_pop(L, 1); // pop the empty buffer
+            }
         }
-        else
-        {
-            lua_pop(L, 1); // pop empty array, emit nothing
-        }
+        lua_pop(L, 1); // pop the array
 
         return idx;
     }
@@ -113,20 +130,23 @@ namespace
     int slua_ruleset_serialize_string_map(lua_State* L, int list, int idx,
         const RulesetParamDescriptor& desc)
     {
-        // Collect keys for deterministic ordering.
-        std::vector<std::string> keys;
+        // Collect keys for deterministic ordering. Holding raw pointers is fine:
+        // the map is on the stack and nothing below can run script code to mutate it.
+        std::vector<TString*> keys;
         for (int index = 0; (index = lua_rawiter(L, -1, index)) >= 0;)
         {
             if (lua_type(L, -2) == LUA_TSTRING)
-                keys.push_back(lua_tostring(L, -2));
+                keys.push_back(tsvalue(luaA_toobject(L, -2)));
             lua_pop(L, 2);
         }
-        std::sort(keys.begin(), keys.end());
+        std::sort(keys.begin(), keys.end(), [](TString* a, TString* b) {
+            return luaV_strcmp(a, b) < 0;
+        });
 
         LuaTable* t = hvalue(luaA_toobject(L, -1));
-        for (const auto& key : keys)
+        for (TString* key : keys)
         {
-            const TValue* val = luaH_getstr(t, luaS_new(L, key.c_str()));
+            const TValue* val = luaH_getstr(t, key);
             if (ttisnil(val))
                 continue;
             luaA_pushvalue(L, val);
@@ -134,7 +154,9 @@ namespace
                 continue;
             lua_pushinteger(L, desc.tag);
             lua_rawseti(L, list, ++idx);
-            lua_pushlstring(L, key.c_str(), key.size());
+            TValue key_tv;
+            setsvalue(L, &key_tv, key);
+            luaA_pushvalue(L, &key_tv);
             lua_rawseti(L, list, ++idx);
             lua_rawseti(L, list, ++idx); // value
         }
@@ -198,13 +220,30 @@ void ruleset_builder_def_add_flags(
     def->flag_descs.assign(descs, descs + count);
 }
 
+void slua_ruleset_fix_names(lua_State* L, const RulesetBuilderDef* def)
+{
+    for (const auto& desc : def->descs)
+        luaS_fix(luaS_new(L, desc.name));
+    for (const auto& fdesc : def->flag_descs)
+        luaS_fix(luaS_new(L, fdesc.name));
+}
+
 void slua_ruleset_serialize(lua_State* L, int params_idx, const RulesetBuilderDef* def)
 {
+    // Resolve before pushing the list, which would shift relative indices
+    params_idx = lua_absindex(L, params_idx);
+    bool has_params = !lua_isnoneornil(L, params_idx);
+    if (has_params)
+        luaL_checktype(L, params_idx, LUA_TTABLE);
+
+    // list, field value, strbuf, element, tostring call
+    luaL_checkstack(L, 8, "ruleset");
+
     lua_newtable(L);
     int list = lua_gettop(L);
     int idx = 0;
 
-    if (lua_isnoneornil(L, params_idx))
+    if (!has_params)
         return; // empty list
 
     // Phase 1: accumulate flag bits per backing field.
@@ -337,36 +376,4 @@ bool slua_ruleset_coerce(lua_State* L, int params_idx, const RulesetBuilderDef* 
     lua_replace(L, params_idx);
 
     return true;
-}
-
-void slua_register_ruleset_fn(
-    lua_State*               L,
-    const char*              module_name,
-    const char*              fn_name,
-    lua_CFunction            fn,
-    const RulesetBuilderDef* def
-)
-{
-    int top = lua_gettop(L);
-
-    lua_getglobal(L, module_name);
-    if (!lua_istable(L, -1))
-    {
-        lua_pop(L, 1);
-        lua_newtable(L);
-    }
-    else
-    {
-        lua_setreadonly(L, -1, false);
-    }
-    int module_idx = lua_gettop(L);
-
-    lua_pushlightuserdata(L, (void*)def);
-    lua_pushcclosurek(L, fn, fn_name, 1, nullptr);
-    lua_setfield(L, module_idx, fn_name);
-
-    lua_setreadonly(L, module_idx, true);
-    lua_setglobal(L, module_name);
-
-    LUAU_ASSERT(lua_gettop(L) == top);
 }

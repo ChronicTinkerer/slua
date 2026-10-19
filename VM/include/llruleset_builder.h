@@ -2,13 +2,9 @@
 #include <cstddef>
 
 struct lua_State;
-typedef int (*lua_CFunction)(lua_State* L);
-
-// Default link target: apply to the prim running the script.
-static const int SLUA_LINK_THIS = -4;
 
 // A note about C++20 porting.
-// The const char* name fields in the descriptors must have static storage duration 
+// The const char* name fields in the descriptors must have static storage duration
 // (e.g. string literals).
 // This is not enforced at compile time,
 // but when moving to C++20 we can do something like the following:
@@ -19,7 +15,7 @@ static const int SLUA_LINK_THIS = -4;
 //    operator const char*() const noexcept { return ptr; }
 //    const char* ptr;
 // };
-// The consteval constructor ensures that only string literals can be used 
+// The consteval constructor ensures that only string literals can be used
 // to construct a LiteralString.
 
 struct RulesetParamDescriptor
@@ -60,8 +56,13 @@ void ruleset_builder_def_add_flags(
     size_t                       count
 );
 
+// Intern and fix all of def's property names in L so serializing never allocates them.
+// Call during VM setup, before lua_fixallcollectable().
+void slua_ruleset_fix_names(lua_State* L, const RulesetBuilderDef* def);
+
 // Serialize a params table into a flat tag/value rules list and push it onto the stack.
-// params_idx is the stack index of the params table (may be nil -- emits an empty list).
+// params_idx is the stack index of the params table. nil emits an empty list, and any
+// other non-table raises a type error.
 // Flag boolean properties are merged into their backing integer field before emission.
 void slua_ruleset_serialize(lua_State* L, int params_idx, const RulesetBuilderDef* def);
 
@@ -71,14 +72,3 @@ void slua_ruleset_serialize(lua_State* L, int params_idx, const RulesetBuilderDe
 // If the value is already a sequential list, nil, or non-table, leaves it unchanged.
 // Returns true if coercion was performed, false otherwise.
 bool slua_ruleset_coerce(lua_State* L, int params_idx, const RulesetBuilderDef* def);
-
-// Register fn as module_name.fn_name in L's globals, with def stored as upvalue 1.
-// Creates the module table if it does not yet exist; adds to it if it does.
-// Sets the module table readonly after each call.
-void slua_register_ruleset_fn(
-    lua_State*               L,
-    const char*              module_name,
-    const char*              fn_name,
-    lua_CFunction            fn,
-    const RulesetBuilderDef* def
-);
