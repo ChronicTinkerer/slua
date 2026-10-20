@@ -234,19 +234,15 @@ struct FValueVersionSetter
     X("LuauIntegerLibrary") \
     X("LuauIntegerFastcalls") \
     X("LuauIntegerBufferFastcalls") \
-    X("LuauTableArrayAdjustCheck") \
     X("LuauTableArrayShrinkOrder") \
     X("LuauTableRobustOom") \
-    X("LuauTableMoveTimeoutFix") \
     X("LuauSplitTableLookups") \
     X("LuauCallLuauTm") \
     X("LuauSandboxFreezesVectorMetatable") \
     X("FixMathNoisePrecision") \
     X("LuauLoadRemapOptionalUserdata") \
-    X("LuauEnumMoreEdges") \
     X("LuauEasyStateInit") \
     X("LuauNewPointerEncode") \
-    X("LuauBackedgeHeapCheck") \
     X("LuauFastpcall") \
     X("LuauPcallOptimize") \
     X("LuauFastpcallInterrupt") \

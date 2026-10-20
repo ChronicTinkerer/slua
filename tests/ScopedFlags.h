@@ -61,7 +61,9 @@ struct [[nodiscard]] ScopedSLuaFlags
     {
 #define SLUA_SCOPE_FFLAG(name) \
     if (Luau::FValue<bool>* flag = Luau::findFastFlag(name)) \
-        flags.emplace_back(*flag, true);
+        flags.emplace_back(*flag, true); \
+    else \
+        LUAU_ASSERT(!"SLUA_REQUIRED_FFLAGS names a flag that no longer exists");
 
         SLUA_REQUIRED_FFLAGS(SLUA_SCOPE_FFLAG)
 #undef SLUA_SCOPE_FFLAG
