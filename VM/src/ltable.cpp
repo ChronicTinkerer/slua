@@ -1284,10 +1284,7 @@ static void rehash(lua_State* L, LuaTable* t, int newintkey)
 
 LuaTable* luaH_new(lua_State* L, int narray, int nhash)
 {
-    // ServerLua: Keep track of unrooted user allocs if there are multiple in a row
-    LUAU_TRACK_UNROOTED_ALLOCS();
     LuaTable* t = luaM_newgco(L, LuaTable, sizeof(LuaTable), L->activememcat, LUA_TTABLE);
-    LUAU_MAYBE_TRACK_UNROOTED(L, sizeof(LuaTable));
     luaC_init(L, t, LUA_TTABLE);
     t->metatable = NULL;
     t->tmcache = cast_byte(~0);
@@ -1303,13 +1300,10 @@ LuaTable* luaH_new(lua_State* L, int narray, int nhash)
     // below allocs to make sure we don't blow up in luaH_free()
     // if they throw.
     t->iterorder = nullptr;
+    // ServerLua: Keep track of `t` while it's unrooted, so the allocs below see it
+    LUAU_TRACK_UNROOTED_ALLOCS(t);
     if (narray > 0)
-    {
         setarrayvector(L, t, narray);
-        LUAU_MAYBE_TRACK_UNROOTED(L, t->sizearray * sizeof(TValue));
-    }
-    // ServerLua: Don't need to do it for the last alloc, the table should be
-    //   reachable immediately after this in the cases we care about.
     if (nhash > 0)
         setnodevector(L, t, nhash);
     return t;
@@ -1888,10 +1882,7 @@ int luaH_getn(LuaTable* t)
 
 LuaTable* luaH_clone(lua_State* L, LuaTable* tt)
 {
-    // ServerLua: keep track of unrooted allocs here since this doesn't use luaH_new() under the hood.
-    LUAU_TRACK_UNROOTED_ALLOCS();
     LuaTable* t = luaM_newgco(L, LuaTable, sizeof(LuaTable), L->activememcat, LUA_TTABLE);
-    LUAU_MAYBE_TRACK_UNROOTED(L, sizeof(LuaTable));
     luaC_init(L, t, LUA_TTABLE);
     t->metatable = tt->metatable;
     t->tmcache = tt->tmcache;
@@ -1905,6 +1896,8 @@ LuaTable* luaH_clone(lua_State* L, LuaTable* tt)
     t->lastfree = 0;
     // Ares: Initialize this up here in case an alloc fails
     t->iterorder = nullptr;
+    // ServerLua: Keep track of `t` while it's unrooted, so the allocs below see it
+    LUAU_TRACK_UNROOTED_ALLOCS(t);
 
     if (tt->sizearray)
     {
@@ -1913,8 +1906,6 @@ LuaTable* luaH_clone(lua_State* L, LuaTable* tt)
         t->sizearray = tt->sizearray;
 
         memcpy(t->array, tt->array, t->sizearray * sizeof(TValue));
-
-        LUAU_MAYBE_TRACK_UNROOTED(L, t->sizearray * sizeof(TValue));
     }
 
     if (tt->node != dummynode)

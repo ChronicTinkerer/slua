@@ -73,7 +73,7 @@ static inline bool mark_seen(ReachableContext* ctx, GCObject* obj)
 static void enqueueobj(ReachableContext* ctx, GCObject* obj)
 {
     // Note that this is strictly for _user_ allocations that we haven't seen before!
-    if (!obj)
+    if (LUAU_UNLIKELY(!obj))
         return;
 
     // We allow traversing threads even if they have a system memcat so long as their _active_
@@ -84,6 +84,10 @@ static void enqueueobj(ReachableContext* ctx, GCObject* obj)
         ctx->worklist.push_back(obj);
     }
 }
+
+// For typed object pointers. obj2gco() reads the object when asserts are on, so the null
+// check has to come first.
+#define enqueueref(ctx, o) do { auto* enqueueref_ptr = (o); if (enqueueref_ptr) enqueueobj(ctx, obj2gco(enqueueref_ptr)); } while (0)
 
 // Strings and UUIDs act as values in user weak tables (see isobjcleared in
 // lgc.cpp): they keep their entries alive and stay charged.
@@ -99,8 +103,7 @@ static void traversetable(ReachableContext* ctx, LuaTable* h)
     LUAU_ASSERT(!hasmetacache(h));
 
     // Traverse metatable
-    if (h->metatable)
-        enqueueobj(ctx, obj2gco(h->metatable));
+    enqueueref(ctx, h->metatable);
 
     // Weak sides of weak tables are deferred to the post-walk clear pass, so
     // objects reachable only through them are neither charged nor kept.
@@ -152,7 +155,7 @@ static void traversetable(ReachableContext* ctx, LuaTable* h)
 static void traverseclosure(ReachableContext* ctx, Closure* cl)
 {
     // Traverse environment
-    enqueueobj(ctx, obj2gco(cl->env));
+    enqueueref(ctx, cl->env);
 
     if (cl->isC)
     {
@@ -166,7 +169,7 @@ static void traverseclosure(ReachableContext* ctx, Closure* cl)
     else
     {
         // Traverse proto
-        enqueueobj(ctx, obj2gco(cl->l.p));
+        enqueueref(ctx, cl->l.p);
 
         // Traverse Lua closure upvalues
         for (int i = 0; i < cl->nupvalues; ++i)
@@ -180,20 +183,19 @@ static void traverseclosure(ReachableContext* ctx, Closure* cl)
 static void traverseudata(ReachableContext* ctx, Udata* u)
 {
     // Traverse metatable
-    if (u->metatable)
-        enqueueobj(ctx, obj2gco(u->metatable));
+    enqueueref(ctx, u->metatable);
 
     // Traverse any internal references udatas might have, if applicable.
     switch(u->tag)
     {
         case UTAG_LLEVENTS:
-            enqueueobj(ctx, obj2gco(((lua_LLEvents*)&u->data)->handlers_tab));
+            enqueueref(ctx, ((lua_LLEvents*)&u->data)->handlers_tab);
             break;
         case UTAG_LLTIMERS:
-            enqueueobj(ctx, obj2gco(((lua_LLTimers*)&u->data)->timers_tab));
+            enqueueref(ctx, ((lua_LLTimers*)&u->data)->timers_tab);
             break;
         case UTAG_UUID:
-            enqueueobj(ctx, obj2gco(((lua_LSLUUID*)&u->data)->str));
+            enqueueref(ctx, ((lua_LSLUUID*)&u->data)->str);
             break;
         default:
             break;
@@ -203,7 +205,7 @@ static void traverseudata(ReachableContext* ctx, Udata* u)
 static void traversethread(ReachableContext* ctx, lua_State* th)
 {
     // Traverse globals table
-    enqueueobj(ctx, obj2gco(th->gt));
+    enqueueref(ctx, th->gt);
 
     // We don't traverse th->namecall, it's not a user alloc anyway.
 
@@ -216,22 +218,19 @@ static void traversethread(ReachableContext* ctx, lua_State* th)
 
     // Traverse open upvalues
     for (UpVal* uv = th->openupval; uv; uv = uv->u.open.threadnext)
-        enqueueobj(ctx, obj2gco(uv));
+        enqueueref(ctx, uv);
 
     // Traverse pending coroutine.finally() callbacks
-    if (th->finalizers)
-        enqueueobj(ctx, obj2gco(th->finalizers));
+    enqueueref(ctx, th->finalizers);
 }
 
 static void traverseproto(ReachableContext* ctx, Proto* p)
 {
     // Traverse source string
-    if (p->source)
-        enqueueobj(ctx, obj2gco(p->source));
+    enqueueref(ctx, p->source);
 
     // Traverse debug name string
-    if (p->debugname)
-        enqueueobj(ctx, obj2gco(p->debugname));
+    enqueueref(ctx, p->debugname);
 
     // Traverse constants
     for (int i = 0; i < p->sizek; ++i)
@@ -242,24 +241,15 @@ static void traverseproto(ReachableContext* ctx, Proto* p)
 
     // Traverse upvalue names
     for (int i = 0; i < p->sizeupvalues; ++i)
-    {
-        if (p->upvalues[i])
-            enqueueobj(ctx, obj2gco(p->upvalues[i]));
-    }
+        enqueueref(ctx, p->upvalues[i]);
 
     // Traverse sub-protos
     for (int i = 0; i < p->sizep; ++i)
-    {
-        if (p->p[i])
-            enqueueobj(ctx, obj2gco(p->p[i]));
-    }
+        enqueueref(ctx, p->p[i]);
 
     // Traverse local variable names
     for (int i = 0; i < p->sizelocvars; ++i)
-    {
-        if (p->locvars[i].varname)
-            enqueueobj(ctx, obj2gco(p->locvars[i].varname));
-    }
+        enqueueref(ctx, p->locvars[i].varname);
 }
 
 static void traverseupval(ReachableContext* ctx, UpVal* uv)
@@ -272,13 +262,12 @@ static void traverseupval(ReachableContext* ctx, UpVal* uv)
 // Mirrors traverseclass in lgc.cpp
 static void traverseclass(ReachableContext* ctx, LuauClass* lco)
 {
-    enqueueobj(ctx, obj2gco(lco->name));
-    if (lco->super)
-        enqueueobj(ctx, obj2gco(lco->super));
-    enqueueobj(ctx, obj2gco(lco->memberstooffset));
+    enqueueref(ctx, lco->name);
+    enqueueref(ctx, lco->super);
+    enqueueref(ctx, lco->memberstooffset);
 
     for (uint32_t i = 0; i < lco->numberofallmembers; ++i)
-        enqueueobj(ctx, obj2gco(lco->offsettomember[i]));
+        enqueueref(ctx, lco->offsettomember[i]);
 
     uint32_t numberofstaticmembers = lco->numberofallmembers - lco->numberofinstancemembers;
     for (uint32_t i = 0; i < numberofstaticmembers; ++i)
@@ -287,14 +276,13 @@ static void traverseclass(ReachableContext* ctx, LuauClass* lco)
             enqueueobj(ctx, gcvalue(&lco->staticmembers[i]));
     }
 
-    if (lco->instancemetatable)
-        enqueueobj(ctx, obj2gco(lco->instancemetatable));
+    enqueueref(ctx, lco->instancemetatable);
 }
 
 // Mirrors traverseobject in lgc.cpp
 static void traverseobject(ReachableContext* ctx, LuauObject* inst)
 {
-    enqueueobj(ctx, obj2gco(inst->lclass));
+    enqueueref(ctx, inst->lclass);
 
     for (uint32_t i = 0; i < inst->numberofmembers; ++i)
     {
@@ -598,6 +586,11 @@ void luaC_enumreachableuserallocs(
     // We start walking from the thread root
     if (mark_seen(&ctx, obj2gco(L)))
         ctx.worklist.push_back(obj2gco(L));
+
+    // Objects still being built aren't reachable yet but will be soon, so they're roots too.
+    // Only makes sense when walking the thread that's currently executing.
+    for (const UnrootedAllocTracker* tracker = ctx.global->unrootedallocs; tracker; tracker = tracker->prev)
+        enqueueobj(&ctx, tracker->obj);
 
     while (!ctx.worklist.empty())
     {

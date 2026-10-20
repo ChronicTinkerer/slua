@@ -26,13 +26,10 @@ typedef struct LG
     global_State g;
 } LG;
 
-static void stack_init(lua_State* L1, lua_State* L, bool track_allocs)
+static void stack_init(lua_State* L1, lua_State* L)
 {
     // initialize CallInfo array
     L1->base_ci = luaM_newarray(L, BASIC_CI_SIZE, CallInfo, L1->memcat);
-    // ServerLua: keep track of these allocs if we're being called by luaE_newthread()
-    if (track_allocs)
-        LUAU_MAYBE_TRACK_UNROOTED(L, sizeof(CallInfo) * BASIC_CI_SIZE);
     L1->ci = L1->base_ci;
     L1->size_ci = BASIC_CI_SIZE;
     L1->end_ci = L1->base_ci + L1->size_ci - 1;
@@ -74,7 +71,7 @@ static LuaTable* weakenvalues(lua_State* L, LuaTable* wt)
 static void f_luaopen(lua_State* L, void* ud)
 {
     global_State* g = L->global;
-    stack_init(L, L, false);                      // init stack
+    stack_init(L, L);                             // init stack
     L->gt = luaH_new(L, 0, 2);                    // table of globals
     sethvalue(L, registry(L), luaH_new(L, 0, 2)); // registry
     luaS_resize(L, LUA_MINSTRTABSIZE);            // initial size of string table
@@ -145,12 +142,7 @@ static void close_state(lua_State* L)
 
 lua_State* luaE_newthread(lua_State* L)
 {
-    // ServerLua: Keep track of allocs we make relating to creating this while the
-    //   thread itself is unrooted.
-    LUAU_TRACK_UNROOTED_ALLOCS();
-
     lua_State* L1 = luaM_newgco(L, lua_State, sizeof(lua_State), L->activememcat, LUA_TTHREAD);
-    LUAU_MAYBE_TRACK_UNROOTED(L, sizeof(lua_State));
 
     if (FFlag::LuauEasyStateInit)
         memset(L1, 0, sizeof(lua_State));
@@ -163,7 +155,9 @@ lua_State* luaE_newthread(lua_State* L)
         preinit_state(L1, L->global);
 
     L1->activememcat = L->activememcat; // inherit the active memory category
-    stack_init(L1, L, true);            // init stack
+    // ServerLua: Keep track of the thread while it's unrooted, so the stack allocs see it
+    LUAU_TRACK_UNROOTED_ALLOCS(L1);
+    stack_init(L1, L);                  // init stack
     L1->gt = L->gt;                     // share table of globals
     L1->singlestep = L->singlestep;
     LUAU_ASSERT(iswhite(obj2gco(L1)));
@@ -303,7 +297,7 @@ lua_State* lua_newstate(lua_Alloc allocator, void* ud)
         g->frealloc = allocator;
         g->ud = ud;
         // ServerLua: For user alloc tracking
-        g->unrooteduserallocs = 0;
+        g->unrootedallocs = nullptr;
         g->mainthread = L;
         g->uvhead.u.open.prev = &g->uvhead;
         g->uvhead.u.open.next = &g->uvhead;

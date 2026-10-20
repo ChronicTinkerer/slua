@@ -2407,9 +2407,7 @@ size_t lua_userthreadgc(lua_State *L, const lua_OpaqueGCObjectSet* free_objects)
         },
         free_objects
     );
-    // Make sure we include the size of allocs from not-yet-rooted objects.
-    // Note that this only makes sense if we call this on a thread that's currently executing.
-    return total_size + L->global->unrooteduserallocs;
+    return total_size;
 }
 
 lua_OpaqueGCObjectSet lua_collectfreeobjects(lua_State *L)

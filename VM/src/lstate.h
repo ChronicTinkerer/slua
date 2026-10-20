@@ -194,11 +194,11 @@ typedef struct global_State
     lua_Alloc frealloc;   // function to reallocate memory
     void* ud;             // auxiliary data to `frealloc'
 
-    // ServerLua: This keeps tracks of user allocs that aren't currently
+    // ServerLua: This keeps track of objects that aren't currently
     //   rooted, but will be soon if the function succeeds. Only relevant
     //   when code makes multiple allocs in a row in a user memcat without
     //   a reference being reachable from the root.
-    size_t unrooteduserallocs;
+    struct UnrootedAllocTracker* unrootedallocs;
 
     uint8_t currentwhite;
     uint8_t gcstate; // state of garbage collector

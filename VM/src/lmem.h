@@ -43,17 +43,18 @@ LUAI_FUNC lua_Page* luaM_getnextpage(lua_Page* page);
 LUAI_FUNC void luaM_visitpage(lua_Page* page, void* context, bool (*visitor)(void* context, lua_Page* page, GCObject* gco));
 LUAI_FUNC void luaM_visitgco(lua_State* L, void* context, bool (*visitor)(void* context, lua_Page* page, GCObject* gco));
 
-// ServerLua: for user allocation tracking, basically used as a `defer` to clear out
-// `unrooteduserallocs` in case of exceptions.
+// ServerLua: for user allocation tracking. Links an object that's still being built, and isn't
+// reachable yet, into `unrootedallocs` so heap walks treat it as a root. Unlinks on scope exit,
+// including exceptions. Walks traverse the object, so its fields must be valid while tracked.
 struct global_State;
-class UnrootedAllocTracker
+struct UnrootedAllocTracker
 {
-public:
-    UnrootedAllocTracker(lua_State *L);
+    UnrootedAllocTracker(lua_State* L, GCObject* o);
     ~UnrootedAllocTracker();
-protected:
-    global_State *_mGlobalState;
+
+    global_State* g;
+    GCObject* obj;
+    UnrootedAllocTracker* prev;
 };
 
-#define LUAU_TRACK_UNROOTED_ALLOCS() [[maybe_unused]] UnrootedAllocTracker _tracker{L};
-#define LUAU_MAYBE_TRACK_UNROOTED(L, size) do { if ((L)->activememcat >= LUA_FIRST_USER_MEMCAT) { L->global->unrooteduserallocs += (size); }} while (0);
+#define LUAU_TRACK_UNROOTED_ALLOCS(o) [[maybe_unused]] UnrootedAllocTracker _tracker{L, obj2gco(o)};

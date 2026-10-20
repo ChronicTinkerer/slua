@@ -1041,8 +1041,13 @@ void luaM_visitgco(lua_State* L, void* context, bool (*visitor)(void* context, l
 }
 
 
-UnrootedAllocTracker::UnrootedAllocTracker(lua_State* L) : _mGlobalState(L->global) {}
+UnrootedAllocTracker::UnrootedAllocTracker(lua_State* L, GCObject* o) : g(L->global), obj(o), prev(L->global->unrootedallocs)
+{
+    g->unrootedallocs = this;
+}
+
 UnrootedAllocTracker::~UnrootedAllocTracker()
 {
-    _mGlobalState->unrooteduserallocs = 0;
+    LUAU_ASSERT(g->unrootedallocs == this);
+    g->unrootedallocs = prev;
 }
