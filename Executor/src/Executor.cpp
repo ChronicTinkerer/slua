@@ -121,6 +121,12 @@ lua_State* Environment::openVM()
     eris_register_perms(L, true);
     eris_register_perms(L, false);
 
+    // Refuse anything a script state should never hold, like raw pointers
+    // or protos that aren't permanents
+    lua_pushboolean(L, true);
+    eris_set_setting(L, "strict", -1);
+    lua_pop(L, 1);
+
     lua_fixallcollectable(L);
 
     return L;

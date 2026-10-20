@@ -82,6 +82,9 @@ LUA_API int eris_unpersist(lua_State* L, int perms, int value, void *threaddata 
  *            unpersisting it will pass along a ZIO*.
  * - 'spkey'  the name of the field in the metatable of tables and userdata
  *            used to control persistence (on/off or special persistence).
+ * - 'strict' whether to refuse values a production script state never holds,
+ *            on both persist and unpersist: protos by value, untagged
+ *            lightuserdata and test-only userdata.
  *
  * If an unknown name is specified this will throw an error.
  *

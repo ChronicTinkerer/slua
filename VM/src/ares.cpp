@@ -88,6 +88,11 @@ static const bool kWriteDebugInformation = true;
  * processing and memory overhead this introduces. */
 static const bool kGeneratePath = false;
 
+/* Refuse values a production script state never holds: protos by value,
+ * untagged lightuserdata and test-only userdata. Applies to both persisting
+ * and unpersisting. */
+static const bool kStrict = false;
+
 /* The maximum object complexity. This is the number of allowed recursions when
  * persisting or unpersisting an object, for example for nested tables. This is
  * used to avoid segfaults when writing or reading user data. */
@@ -211,6 +216,7 @@ typedef uint64_t ares_size_t;
 #define ERIS_ERR_MAJOR "unsupported file format version %u.%u (want %u.x through %u.x)"
 #define ERIS_ERR_FEATURE "file format version %u.%u uses features 0x%llx this reader doesn't know"
 #define ERIS_ERR_STRIDX "malformed data: string table index %llu out of range (table has %d)"
+#define ERIS_ERR_STRICT "%s not allowed in strict mode"
 
 /*
 ** ============================================================================
@@ -368,6 +374,7 @@ typedef struct Info {
   int refcount; /* int because rawseti/rawgeti takes an int. */
   lua_Unsigned maxComplexity;
   bool generatePath;
+  bool strict;
   bool persisting;
   bool anyProtoNative;
   /* Which one it really is will always be clear from the context. */
@@ -390,6 +397,7 @@ static const char kSettingGeneratePath[] = "path";
 static const char kSettingWriteDebugInfo[] = "debug";
 static const char kSettingMaxComplexity[] = "maxrec";
 static const char kSettingTestPadding[] = "testpad";
+static const char kSettingStrict[] = "strict";
 static const char kForkerPermsTable[] = "forkerpermstable";
 static const char kForkerUPermsTable[] = "forkerupermstable";
 static const char kForkerBaseThread[] = "forkerbasethread";
@@ -1324,7 +1332,11 @@ u_boolean(Info *info) {                                                /* ... */
 
 static void
 p_pointer(Info *info) {                                         /* ... ludata */
-  WRITE_VALUE((uint8_t)lua_lightuserdatatag(info->L, -1), uint8_t);
+  const int tag = lua_lightuserdatatag(info->L, -1);
+  if (info->strict && tag == 0) {
+    eris_error(info, ERIS_ERR_STRICT, "untagged lightuserdata");
+  }
+  WRITE_VALUE((uint8_t)tag, uint8_t);
   /* A pointer-sized value, not an index, so it stays fixed width. */
   WRITE_VALUE((uint64_t)(uintptr_t)lua_touserdata(info->L, -1), uint64_t);
 }
@@ -1335,6 +1347,9 @@ u_pointer(Info *info) {                                                /* ... */
   uint8_t tag = READ_VALUE(uint8_t);
   if (tag >= LUTAG_ARES_START) {
     eris_error(info, "malformed data: invalid lightuserdata tag");
+  }
+  if (info->strict && tag == 0) {
+    eris_error(info, ERIS_ERR_STRICT, "untagged lightuserdata");
   }
   const uint64_t raw = READ_VALUE(uint64_t);
   if (raw > (uint64_t)UINTPTR_MAX) {
@@ -1945,6 +1960,9 @@ static void p_userdata(Info *info) {                               /* ... udata 
     }
     case UTAG_ARES_TEST:
     {
+        if (info->strict) {
+          eris_error(info, ERIS_ERR_STRICT, "test userdata");
+        }
         const auto *obj = (const lua_AresTestObject*)value;
         WRITE_VALUE((int)obj->base, int);
         if (obj->newer_block) {
@@ -2119,6 +2137,9 @@ static void u_userdata(Info *info) {                                   /* ... */
       }
       case UTAG_ARES_TEST:
       {
+          if (info->strict) {
+            eris_error(info, ERIS_ERR_STRICT, "test userdata");
+          }
           auto *obj = (lua_AresTestObject*)lua_newuserdatatagged(
               info->L,
               sizeof(lua_AresTestObject),
@@ -2164,6 +2185,11 @@ p_proto(Info *info) {                                            /* ... proto */
   const Proto *p = (Proto*)lua_tolightuserdatatagged(info->L, -1, LUTAG_ARES_PROTO);
   eris_assert(p);
   eris_checkstack(info->L, 3);
+
+  // A production state holds protos only as permanents, which never get here
+  if (info->strict) {
+    eris_error(info, ERIS_ERR_STRICT, "proto by value");
+  }
 
   // Inliner output. Snapshots must only ever contain compiled bytecode, never code
   // this VM generated at runtime.
@@ -2282,6 +2308,9 @@ p_proto(Info *info) {                                            /* ... proto */
 static void
 u_proto(Info *info) {                                            /* ... proto */
   int i, n;
+  if (info->strict) {
+    eris_error(info, ERIS_ERR_STRICT, "proto by value");
+  }
   Proto *p = (Proto*)lua_tolightuserdatatagged(info->L, -1, LUTAG_ARES_PROTO);
   if (!p) {
     eris_error(info, "malformed data: expected proto pointer");
@@ -4147,6 +4176,7 @@ unchecked_persist(lua_State *L, std::ostream *writer) {
   info.refcount = 0;
   info.maxComplexity = kMaxComplexity;
   info.generatePath = kGeneratePath;
+  info.strict = kStrict;
   info.persisting = true;
   info.u.pi.writer = writer;
   info.u.pi.writeDebugInfo = kWriteDebugInformation;
@@ -4183,6 +4213,11 @@ unchecked_persist(lua_State *L, std::ostream *writer) {
   if (get_setting(L, (void*)&kSettingWriteDebugInfo)) {
                                                   /* perms buff rootobj value */
     info.u.pi.writeDebugInfo = lua_toboolean(L, -1);
+    lua_pop(L, 1);                                      /* perms buff rootobj */
+  }
+  if (get_setting(L, (void*)&kSettingStrict)) {
+                                                  /* perms buff rootobj value */
+    info.strict = lua_toboolean(L, -1);
     lua_pop(L, 1);                                      /* perms buff rootobj */
   }
 
@@ -4248,6 +4283,7 @@ unchecked_unpersist(lua_State *L, const char *data, size_t size, void *threaddat
   info.refcount = 0;
   info.maxComplexity = kMaxComplexity;
   info.generatePath = kGeneratePath;
+  info.strict = kStrict;
   info.persisting = false;
   Luau::ByteReader root{data, size};
   info.u.upi.cur = &root;
@@ -4264,6 +4300,11 @@ unchecked_unpersist(lua_State *L, const char *data, size_t size, void *threaddat
   if (get_setting(L, (void*)&kSettingGeneratePath)) {
                                                  /* perms buff? rootobj value */
     info.generatePath = lua_toboolean(L, -1);
+    lua_pop(L, 1);                                     /* perms buff? rootobj */
+  }
+  if (get_setting(L, (void*)&kSettingStrict)) {
+                                                 /* perms buff? rootobj value */
+    info.strict = lua_toboolean(L, -1);
     lua_pop(L, 1);                                     /* perms buff? rootobj */
   }
 
@@ -4411,6 +4452,11 @@ l_settings(lua_State *L) {                                /* name value? ...? */
         lua_pushunsigned(L, 0);
       }
     }
+    else if (IS(kSettingStrict)) {
+      if (!get_setting(L, (void*)&kSettingStrict)) {
+        lua_pushboolean(L, kStrict);
+      }
+    }
     else {
       luaL_argerror(L, 1, "no such setting");
       return 0;
@@ -4435,6 +4481,10 @@ l_settings(lua_State *L) {                                /* name value? ...? */
     else if (IS(kSettingTestPadding)) {
       luaL_optunsigned(L, 2, 0);
       set_setting(L, (void*)&kSettingTestPadding);
+    }
+    else if (IS(kSettingStrict)) {
+      luaL_opt(L, checkboolean, 2, false);
+      set_setting(L, (void*)&kSettingStrict);
     }
     else {
       luaL_argerror(L, 1, "no such setting");
